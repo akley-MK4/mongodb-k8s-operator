@@ -177,22 +177,7 @@ func (in *MongoDBClusterSpec) DeepCopyInto(out *MongoDBClusterSpec) {
 			(*out)[key] = outVal
 		}
 	}
-	if in.ConfigServers != nil {
-		in, out := &in.ConfigServers, &out.ConfigServers
-		*out = make(map[string]*MgoConfigServerSpec, len(*in))
-		for key, val := range *in {
-			var outVal *MgoConfigServerSpec
-			if val == nil {
-				(*out)[key] = nil
-			} else {
-				inVal := (*in)[key]
-				in, out := &inVal, &outVal
-				*out = new(MgoConfigServerSpec)
-				**out = **in
-			}
-			(*out)[key] = outVal
-		}
-	}
+	out.ConfigServer = in.ConfigServer
 	if in.Routers != nil {
 		in, out := &in.Routers, &out.Routers
 		*out = make([]*MgoRouterSpec, len(*in))

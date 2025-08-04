@@ -31,9 +31,9 @@ type MongoDBClusterSpec struct {
 
 	ResourceRequirements map[string]*corev1.ResourceRequirements `json:"resourceRequirements,omitempty"`
 
-	Shards        map[string]*MgoShardSpec        `json:"shards,omitempty"`
-	ConfigServers map[string]*MgoConfigServerSpec `json:"configServers,omitempty"`
-	Routers       []*MgoRouterSpec                `json:"routers,omitempty"`
+	Shards       map[string]*MgoShardSpec `json:"shards,omitempty"`
+	ConfigServer MgoConfigServerSpec      `json:"configServer,omitempty"`
+	Routers      []*MgoRouterSpec         `json:"routers,omitempty"`
 }
 
 // +kubebuilder:validation:Enum:=shard;router;configServer
@@ -43,14 +43,12 @@ type ComponentType string
 const (
 	ComponentTypeShard        ComponentType = "shard"
 	ComponentTypeRouter       ComponentType = "router"
-	ComponentTypeConfigServer ComponentType = "configServer"
+	ComponentTypeConfigServer ComponentType = "configserver"
 )
 
 // +kubebuilder:object:generate=true
 
 type MgoShardSpec struct {
-	// +kubebuilder:default:=255
-	Priority uint8 `json:"priority,omitempty"`
 	// +kubebuilder:default:=/data/db
 	DataPath string `json:"dataPath,omitempty"`
 	// +kubebuilder:default:=27017
@@ -60,8 +58,9 @@ type MgoShardSpec struct {
 // +kubebuilder:object:generate=true
 
 type MgoConfigServerSpec struct {
-	// +kubebuilder:default:=255
-	Priority uint8 `json:"priority,omitempty"`
+	ReplicaSetId string `json:"replicaSetId,omitempty"`
+	// +kubebuilder:default:=3
+	NumReplicaSetNodes int32 `json:"numReplicaSetNodes,omitempty"`
 	// +kubebuilder:default:=/data/configdb
 	DataPath string `json:"dataPath,omitempty"`
 	// +kubebuilder:default:=27019
@@ -71,8 +70,6 @@ type MgoConfigServerSpec struct {
 // +kubebuilder:object:generate=true
 
 type MgoRouterSpec struct {
-	// +kubebuilder:default:=255
-	Priority uint8 `json:"priority,omitempty"`
 	// +kubebuilder:default:=27017
 	Port                uint16   `json:"port,omitempty"`
 	ConfigServerRSNames []string `json:"configServerRSNames,omitempty"`

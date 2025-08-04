@@ -77,6 +77,10 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrlRet, fmt.Errorf("reconcileShards failed, %v", err)
 	}
 
+	if ctrlRet, err := r.reconcileConfigServer(ctx, log, mgoCluster); err != nil {
+		return ctrlRet, fmt.Errorf("reconcileConfigServer failed, %v", err)
+	}
+
 	// The following implementation will update the status
 	meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available",
 		Status: metav1.ConditionTrue, Reason: "Reconciling",

@@ -11,11 +11,10 @@ spec:
   imagePullPolicy: IfNotPresent
   resourceRequirements: {}
   shards:
-    rs1:
-      priority: 0
-  configServers:
-    rs1:
-      priority: 0
+    rs1: {}
+  configServer:
+    replicaSetId: "rs1"
+    numReplicaSetNodes: 3
   routers:
     - configServerRSNames:
       - "rs1"
