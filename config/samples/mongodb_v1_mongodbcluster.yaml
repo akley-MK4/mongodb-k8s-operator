@@ -1,0 +1,21 @@
+apiVersion: mongodb.akleymk4.com/v1
+kind: MongoDBCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: mongodb-k8s-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: mongodbcluster
+spec:
+  images:
+    mongod: mongodb/mongodb-community-server:7.0.11-ubuntu2204
+  imagePullPolicy: IfNotPresent
+  resourceRequirements: {}
+  shards:
+    rs1:
+      priority: 0
+  configServers:
+    rs1:
+      priority: 0
+  routers:
+    - configServerRSNames:
+      - "rs1"
