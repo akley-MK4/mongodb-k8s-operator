@@ -33,7 +33,7 @@ type MongoDBClusterSpec struct {
 
 	Shards       map[string]*MgoShardSpec `json:"shards,omitempty"`
 	ConfigServer MgoConfigServerSpec      `json:"configServer,omitempty"`
-	Routers      []*MgoRouterSpec         `json:"routers,omitempty"`
+	Routers      MgoRoutersSpec           `json:"routers,omitempty"`
 }
 
 // +kubebuilder:validation:Enum:=shard;router;configServer
@@ -51,7 +51,7 @@ const (
 type MgoShardSpec struct {
 	// +kubebuilder:default:=/data/db
 	DataPath string `json:"dataPath,omitempty"`
-	// +kubebuilder:default:=27017
+	// +kubebuilder:default:=27018
 	Port uint16 `json:"port,omitempty"`
 }
 
@@ -60,7 +60,7 @@ type MgoShardSpec struct {
 type MgoConfigServerSpec struct {
 	ReplicaSetId string `json:"replicaSetId,omitempty"`
 	// +kubebuilder:default:=3
-	NumReplicaSetNodes int32 `json:"numReplicaSetNodes,omitempty"`
+	NumReplicas int32 `json:"numReplicas,omitempty"`
 	// +kubebuilder:default:=/data/configdb
 	DataPath string `json:"dataPath,omitempty"`
 	// +kubebuilder:default:=27019
@@ -69,10 +69,14 @@ type MgoConfigServerSpec struct {
 
 // +kubebuilder:object:generate=true
 
-type MgoRouterSpec struct {
+type MgoRoutersSpec struct {
+	// +kubebuilder:default:=ClusterIP
+	ServiceType corev1.ServiceType `json:"serviceType,omitempty"`
+	NumReplicas int32              `json:"numReplicas,omitempty"`
 	// +kubebuilder:default:=27017
-	Port                uint16   `json:"port,omitempty"`
-	ConfigServerRSNames []string `json:"configServerRSNames,omitempty"`
+	ServicePort uint16 `json:"servicePort,omitempty"`
+	// +kubebuilder:default:=27017
+	Port uint16 `json:"port,omitempty"`
 }
 
 // MongoDBClusterStatus defines the observed state of MongoDBCluster.

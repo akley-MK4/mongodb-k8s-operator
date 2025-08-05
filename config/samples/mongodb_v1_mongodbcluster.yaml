@@ -7,14 +7,16 @@ metadata:
   name: mongodbcluster
 spec:
   images:
-    mongod: mongodb/mongodb-community-server:7.0.11-ubuntu2204
+    mongodb: mongodb/mongodb-community-server:7.0.11-ubuntu2204
   imagePullPolicy: IfNotPresent
   resourceRequirements: {}
   shards:
     rs1: {}
   configServer:
     replicaSetId: "rs1"
-    numReplicaSetNodes: 3
+    numReplicas: 3
   routers:
-    - configServerRSNames:
-      - "rs1"
+    serviceType: "ClusterIP"
+    numReplicas: 2
+    servicePort: 27017
+    port: 27017

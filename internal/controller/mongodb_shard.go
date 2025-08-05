@@ -41,6 +41,8 @@ func (r *MongoDBClusterReconciler) reconcileShards(ctx context.Context, log logr
 
 		if ctrlRet, retErr = r.reconcileShardStatefulSet(ctx, log, mgoCluster, *shardSpec, replicaSetId); retErr != nil {
 			return
+		} else if !ctrlRet.Requeue {
+
 		}
 	}
 
@@ -162,8 +164,11 @@ func (r *MongoDBClusterReconciler) createShardStatefulSet(ctx context.Context, m
 	return nil
 }
 
-func fmtComponentTypeObjectName(mgoClusterName string, componentType mongodbv1.ComponentType, componentName string) string {
-	return strings.Join([]string{mgoClusterName, string(componentType), componentName}, "-")
+func fmtComponentTypeObjectName(mgoClusterName string, componentType mongodbv1.ComponentType, replicaSetId string) string {
+	if replicaSetId != "" {
+		return strings.Join([]string{mgoClusterName, string(componentType), replicaSetId}, "-")
+	}
+	return strings.Join([]string{mgoClusterName, string(componentType)}, "-")
 }
 
 func (r *MongoDBClusterReconciler) newShardStatefulSet(mgoCluster *mongodbv1.MongoDBCluster,
@@ -195,15 +200,15 @@ func (r *MongoDBClusterReconciler) newShardStatefulSet(mgoCluster *mongodbv1.Mon
 
 	var containers []corev1.Container
 
-	// mongod
-	imageMongod := mgoCluster.Spec.Images["mongod"]
-	if imageMongod == "" {
+	// mongodb
+	imageMongodb := mgoCluster.Spec.Images["mongodb"]
+	if imageMongodb == "" {
 		return nil, errors.New("the image of mongod is not configured")
 	}
 
 	mongodContainer := corev1.Container{
 		Name:            "mongod",
-		Image:           imageMongod,
+		Image:           imageMongodb,
 		ImagePullPolicy: mgoCluster.Spec.ImagePullPolicy,
 		Ports: []corev1.ContainerPort{{
 			ContainerPort: int32(shardSpec.Port),
@@ -221,7 +226,7 @@ func (r *MongoDBClusterReconciler) newShardStatefulSet(mgoCluster *mongodbv1.Mon
 			"--bind_ip_all",
 		},
 	}
-	if res, ok := mgoCluster.Spec.ResourceRequirements["mongod"]; ok {
+	if res, ok := mgoCluster.Spec.ResourceRequirements["shard"]; ok {
 		mongodContainer.Resources = *res.DeepCopy()
 	} else {
 		mongodContainer.Resources.Requests = make(corev1.ResourceList)

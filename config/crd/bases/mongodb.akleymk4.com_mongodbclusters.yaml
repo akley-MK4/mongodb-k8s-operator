@@ -44,7 +44,7 @@ spec:
                   dataPath:
                     default: /data/configdb
                     type: string
-                  numReplicaSetNodes:
+                  numReplicas:
                     default: 3
                     format: int32
                     type: integer
@@ -125,17 +125,22 @@ spec:
                   type: object
                 type: object
               routers:
-                items:
-                  properties:
-                    configServerRSNames:
-                      items:
-                        type: string
-                      type: array
-                    port:
-                      default: 27017
-                      type: integer
-                  type: object
-                type: array
+                properties:
+                  numReplicas:
+                    format: int32
+                    type: integer
+                  port:
+                    default: 27017
+                    type: integer
+                  servicePort:
+                    default: 27017
+                    type: integer
+                  serviceType:
+                    default: ClusterIP
+                    description: Service Type string describes ingress methods for
+                      a service
+                    type: string
+                type: object
               shards:
                 additionalProperties:
                   properties:
@@ -143,7 +148,7 @@ spec:
                       default: /data/db
                       type: string
                     port:
-                      default: 27017
+                      default: 27018
                       type: integer
                   type: object
                 type: object
