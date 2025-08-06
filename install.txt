@@ -1,0 +1,8 @@
+go mod init github.com/akley-MK4/mongodb-cluster/mgo-k8s-operator
+
+kubebuilder init --domain akleymk4.com --repo github.com/akley-MK4/mongodb-cluster/mgo-k8s-operator
+
+kubebuilder create api --group mongodb --version v1 --kind MongoDBCluster
+
+
+https://hub.docker.com/r/mongodb/mongodb-community-server/tags

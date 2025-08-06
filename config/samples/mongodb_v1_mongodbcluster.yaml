@@ -1,0 +1,22 @@
+apiVersion: mongodb.akleymk4.com/v1
+kind: MongoDBCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: mongodb-k8s-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: mongodbcluster
+spec:
+  images:
+    mongodb: mongodb/mongodb-community-server:7.0.11-ubuntu2204
+  imagePullPolicy: IfNotPresent
+  resourceRequirements: {}
+  shards:
+    rs1: {}
+  configServer:
+    replicaSetId: "rs1"
+    numReplicas: 3
+  routers:
+    serviceType: "ClusterIP"
+    numReplicas: 2
+    servicePort: 27017
+    port: 27017
