@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -22,14 +22,6 @@ import (
 )
 
 func (r *MongoDBClusterReconciler) reconcileRouters(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster) (ctrlRet ctrl.Result, retErr error) {
-	defer func() {
-		if retErr != nil {
-			meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available",
-				Status: metav1.ConditionFalse, Reason: "ReconcilingRouters",
-				Message: fmt.Sprintf("Failed to reconcile the routers, %v", retErr)})
-		}
-	}()
-
 	if ctrlRet, retErr = r.reconcileRouterService(ctx, log, mgoCluster); retErr != nil {
 		return
 	}
@@ -84,7 +76,7 @@ func (r *MongoDBClusterReconciler) reconcileRouterService(ctx context.Context, l
 			return ctrl.Result{}, fmt.Errorf("create failed, %v", e)
 		}
 
-		log.Info("Successfully created a service for %v", mongodbv1.ComponentTypeRouter)
+		log.Info(fmt.Sprintf("Successfully created a service for %v", mongodbv1.ComponentTypeRouter))
 		return ctrl.Result{}, nil
 	}
 
@@ -110,7 +102,7 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 		if e := r.createRouterDeployment(ctx, mgoCluster); e != nil {
 			return ctrl.Result{}, e
 		}
-		log.Info("Successfully created a deployment for %v", mongodbv1.ComponentTypeRouter)
+		log.Info(fmt.Sprintf("Successfully created a deployment for %v", mongodbv1.ComponentTypeRouter))
 		return ctrl.Result{}, nil
 
 	}
@@ -122,19 +114,10 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 				return ctrl.Result{}, e
 			}
 
-			// The following implementation will update the status
-			meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available",
-				Status: metav1.ConditionFalse, Reason: "Resizing",
-				Message: fmt.Sprintf("Failed to update the size for the custom resource (%s): (%s)", mgoCluster.Name, err)})
-
-			if e := r.Status().Update(ctx, mgoCluster); e != nil {
-				return ctrl.Result{}, err
-			}
-
 			return ctrl.Result{}, err
 		}
 
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond * 500}, nil
 	}
 
 	// check the status if the rs is ready
@@ -143,19 +126,18 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 }
 
 func (r *MongoDBClusterReconciler) createRouterDeployment(ctx context.Context, mgoCluster *mongodbv1.MongoDBCluster) (retErr error) {
-
-	statefulSet, errStatefulSet := r.newRouterDeployment(mgoCluster)
-	if errStatefulSet != nil {
-		retErr = fmt.Errorf("newShardStatefulSet failed, %v", errStatefulSet)
+	deployment, errDeployment := r.newRouterDeployment(mgoCluster)
+	if errDeployment != nil {
+		retErr = fmt.Errorf("newRouterDeployment failed, %v", errDeployment)
 		return
 	}
 
-	if e := ctrl.SetControllerReference(mgoCluster, statefulSet, r.Scheme); e != nil {
+	if e := ctrl.SetControllerReference(mgoCluster, deployment, r.Scheme); e != nil {
 		retErr = fmt.Errorf("setControllerReference failed, %v", e)
 		return
 	}
 
-	if e := r.Create(ctx, statefulSet); e != nil {
+	if e := r.Create(ctx, deployment); e != nil {
 		retErr = fmt.Errorf("create failed, %v", e)
 		return
 	}
@@ -163,23 +145,22 @@ func (r *MongoDBClusterReconciler) createRouterDeployment(ctx context.Context, m
 	return nil
 }
 
-func (r *MongoDBClusterReconciler) newRouterDeployment(mgoCluster *mongodbv1.MongoDBCluster) (*appsv1.StatefulSet, error) {
+func (r *MongoDBClusterReconciler) newRouterDeployment(mgoCluster *mongodbv1.MongoDBCluster) (*appsv1.Deployment, error) {
 	confSrvSpec := mgoCluster.Spec.ConfigServer
 	routersSpec := mgoCluster.Spec.Routers
 	objectName := fmtComponentTypeObjectName(mgoCluster.GetName(), mongodbv1.ComponentTypeRouter, "")
 
-	statefulSet := &appsv1.StatefulSet{
+	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      objectName,
 			Namespace: mgoCluster.GetNamespace(),
 		},
 
-		Spec: appsv1.StatefulSetSpec{
+		Spec: appsv1.DeploymentSpec{
 			Replicas: ptr.To(routersSpec.NumReplicas),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"component-type": string(mongodbv1.ComponentTypeRouter)},
 			},
-			ServiceName: fmtComponentTypeObjectName(mgoCluster.GetName(), mongodbv1.ComponentTypeRouter, ""),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -231,7 +212,7 @@ func (r *MongoDBClusterReconciler) newRouterDeployment(mgoCluster *mongodbv1.Mon
 	}
 	containers = append(containers, mongodContainer)
 
-	statefulSet.Spec.Template.Spec.Containers = containers
+	deployment.Spec.Template.Spec.Containers = containers
 
-	return statefulSet, nil
+	return deployment, nil
 }

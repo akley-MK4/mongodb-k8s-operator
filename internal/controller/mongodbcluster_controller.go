@@ -50,7 +50,7 @@ type MongoDBClusterReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
-func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (retCtrl ctrl.Result, retErr error) {
 	log := logf.FromContext(ctx)
 
 	mgoCluster := &mongodbv1.MongoDBCluster{}
@@ -71,18 +71,35 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if err := r.Get(ctx, req.NamespacedName, mgoCluster); err != nil {
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{}, nil
 	}
 
-	if ctrlRet, err := r.reconcileShards(ctx, log, mgoCluster); err != nil {
-		return ctrlRet, fmt.Errorf("reconcileShards failed, %v", err)
+	defer func() {
+		if retErr != nil {
+			meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available",
+				Status: metav1.ConditionFalse, Reason: "Reconciling",
+				Message: retErr.Error(),
+			})
+
+			if e := r.Status().Update(ctx, mgoCluster); e != nil {
+				return
+			}
+		}
+	}()
+
+	if retCtrl, retErr = r.reconcileShards(ctx, log, mgoCluster); retErr != nil {
+		retErr = fmt.Errorf("reconcileShards failed, %v", retErr)
+		return
 	}
 
-	if ctrlRet, err := r.reconcileConfigServer(ctx, log, mgoCluster); err != nil {
-		return ctrlRet, fmt.Errorf("reconcileConfigServer failed, %v", err)
+	if retCtrl, retErr = r.reconcileConfigServer(ctx, log, mgoCluster); retErr != nil {
+		retErr = fmt.Errorf("reconcileConfigServer failed, %v", retErr)
+		return
 	}
 
-	if ctrlRet, err := r.reconcileRouters(ctx, log, mgoCluster); err != nil {
-		return ctrlRet, fmt.Errorf("reconcileRouters failed, %v", err)
+	if retCtrl, retErr = r.reconcileRouters(ctx, log, mgoCluster); retErr != nil {
+		retErr = fmt.Errorf("reconcileRouters failed, %v", retErr)
+		return
 	}
 
 	// The following implementation will update the status

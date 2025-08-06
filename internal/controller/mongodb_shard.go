@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -26,14 +26,6 @@ const (
 )
 
 func (r *MongoDBClusterReconciler) reconcileShards(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster) (ctrlRet ctrl.Result, retErr error) {
-	defer func() {
-		if retErr != nil {
-			meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available",
-				Status: metav1.ConditionFalse, Reason: "ReconcilingShards",
-				Message: fmt.Sprintf("Failed to reconcile the shards, %v", retErr)})
-		}
-	}()
-
 	for replicaSetId, shardSpec := range mgoCluster.Spec.Shards {
 		if ctrlRet, retErr = r.reconcileShardHeadlessService(ctx, log, mgoCluster, *shardSpec, replicaSetId); retErr != nil {
 			return
@@ -41,8 +33,6 @@ func (r *MongoDBClusterReconciler) reconcileShards(ctx context.Context, log logr
 
 		if ctrlRet, retErr = r.reconcileShardStatefulSet(ctx, log, mgoCluster, *shardSpec, replicaSetId); retErr != nil {
 			return
-		} else if !ctrlRet.Requeue {
-
 		}
 	}
 
@@ -86,7 +76,7 @@ func (r *MongoDBClusterReconciler) reconcileShardHeadlessService(ctx context.Con
 			return ctrl.Result{}, fmt.Errorf("create failed, %v", e)
 		}
 
-		log.Info("Successfully created a headless service for %v %v", mongodbv1.ComponentTypeShard, replicaSetId)
+		log.Info(fmt.Sprintf("Successfully created a headless service for %v %v", mongodbv1.ComponentTypeShard, replicaSetId))
 		return ctrl.Result{}, nil
 	}
 
@@ -110,7 +100,7 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 		if e := r.createShardStatefulSet(ctx, mgoCluster, shardSpec, replicaSetId); e != nil {
 			return ctrl.Result{}, e
 		}
-		log.Info("Successfully created a StatefulSet for shard %v", replicaSetId)
+		log.Info(fmt.Sprintf("Successfully created a StatefulSet for shard %v", replicaSetId))
 		return ctrl.Result{}, nil
 
 	}
@@ -122,19 +112,10 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 				return ctrl.Result{}, e
 			}
 
-			// The following implementation will update the status
-			meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available",
-				Status: metav1.ConditionFalse, Reason: "Resizing",
-				Message: fmt.Sprintf("Failed to update the size for the custom resource (%s): (%s)", mgoCluster.Name, err)})
-
-			if e := r.Status().Update(ctx, mgoCluster); e != nil {
-				return ctrl.Result{}, err
-			}
-
 			return ctrl.Result{}, err
 		}
 
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond * 500}, nil
 	}
 
 	// check the status if the rs is ready
