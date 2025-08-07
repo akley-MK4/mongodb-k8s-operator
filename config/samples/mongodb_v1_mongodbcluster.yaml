@@ -11,9 +11,11 @@ spec:
   imagePullPolicy: IfNotPresent
   resourceRequirements: {}
   shards:
-    rs1: {}
+    shrs1:
+      numSecondaryNodes: 2
+      numArbiterNodes: 0
   configServer:
-    replicaSetId: "rs1"
+    replicaSetId: "confrs1"
     numReplicas: 3
   routers:
     serviceType: "ClusterIP"

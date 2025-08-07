@@ -90,15 +90,21 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if retCtrl, retErr = r.reconcileShards(ctx, log, mgoCluster); retErr != nil {
 		retErr = fmt.Errorf("reconcileShards failed, %v", retErr)
 		return
+	} else if retCtrl.RequeueAfter > 0 {
+		return
 	}
 
 	if retCtrl, retErr = r.reconcileConfigServer(ctx, log, mgoCluster); retErr != nil {
 		retErr = fmt.Errorf("reconcileConfigServer failed, %v", retErr)
 		return
+	} else if retCtrl.RequeueAfter > 0 {
+		return
 	}
 
 	if retCtrl, retErr = r.reconcileRouters(ctx, log, mgoCluster); retErr != nil {
 		retErr = fmt.Errorf("reconcileRouters failed, %v", retErr)
+		return
+	} else if retCtrl.RequeueAfter > 0 {
 		return
 	}
 

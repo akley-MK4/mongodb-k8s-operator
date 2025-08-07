@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
+	mongoclient "github.com/akley-MK4/mongodb-k8s-operator/pkg/mongo-client"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -120,7 +121,19 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 		return ctrl.Result{RequeueAfter: time.Millisecond * 500}, nil
 	}
 
-	// check the status if the rs is ready
+	routerMgoURI := FmtRouterMgoURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(), routersSpec.ServicePort)
+	for rsId, shardSpec := range mgoCluster.Spec.Shards {
+		primaryURI, secondaryURIs, arbiterURIs := FmtShardMgoURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(), rsId, shardSpec.Port,
+			shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
+		shardMgoURIs := append([]string{primaryURI}, secondaryURIs...)
+		shardMgoURIs = append(shardMgoURIs, arbiterURIs...)
+		if err := mongoclient.CheckAndAddShard(routerMgoURI, rsId, shardMgoURIs, log); err != nil {
+			log.Error(err, "Failed to add a mongodb shard", "replicaSetId", rsId)
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
+
+		log.Info("Successfully add a mongodb shard", "replicaSetId", rsId)
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -179,7 +192,7 @@ func (r *MongoDBClusterReconciler) newRouterDeployment(mgoCluster *mongodbv1.Mon
 		return nil, errors.New("the image of mongod is not configured")
 	}
 
-	confSrvURIList := FmtConfigServerURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(), confSrvSpec.ReplicaSetId, confSrvSpec.NumReplicas, confSrvSpec.Port)
+	confSrvURIList := FmtConfigServerMgoURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(), confSrvSpec.ReplicaSetId, confSrvSpec.NumReplicas, confSrvSpec.Port)
 	argConfDBURIList := confSrvSpec.ReplicaSetId + "/" + strings.Join(confSrvURIList, ",")
 
 	mongodContainer := corev1.Container{
@@ -215,4 +228,20 @@ func (r *MongoDBClusterReconciler) newRouterDeployment(mgoCluster *mongodbv1.Mon
 	deployment.Spec.Template.Spec.Containers = containers
 
 	return deployment, nil
+}
+
+func FmtRouterDeploymentName(clusterName string) string {
+	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeRouter, "")
+}
+
+func FmtRouterServiceName(clusterName string) string {
+	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeRouter, "")
+}
+
+func FmtRouterMgoURIList(clusterName, ns string, routerServicePort uint16) string {
+	svcName := FmtRouterServiceName(clusterName)
+	// Just for testing
+	k8sClusterDomain := "quick3"
+
+	return fmt.Sprintf("%s.%s.svc.%s:%d", svcName, ns, k8sClusterDomain, routerServicePort)
 }

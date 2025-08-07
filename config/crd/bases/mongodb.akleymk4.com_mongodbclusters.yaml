@@ -54,6 +54,22 @@ spec:
                   replicaSetId:
                     type: string
                 type: object
+              defaultRWConcern:
+                properties:
+                  defaultReadConcern:
+                    properties:
+                      level:
+                        type: string
+                    type: object
+                  defaultWriteConcern:
+                    properties:
+                      w:
+                        type: string
+                      wtimeout:
+                        format: int64
+                        type: integer
+                    type: object
+                type: object
               imagePullPolicy:
                 description: PullPolicy describes a policy for if/when to pull a container
                   image
@@ -147,6 +163,10 @@ spec:
                     dataPath:
                       default: /data/db
                       type: string
+                    numArbiterNodes:
+                      type: integer
+                    numSecondaryNodes:
+                      type: integer
                     port:
                       default: 27018
                       type: integer

@@ -31,9 +31,10 @@ type MongoDBClusterSpec struct {
 
 	ResourceRequirements map[string]*corev1.ResourceRequirements `json:"resourceRequirements,omitempty"`
 
-	Shards       map[string]*MgoShardSpec `json:"shards,omitempty"`
-	ConfigServer MgoConfigServerSpec      `json:"configServer,omitempty"`
-	Routers      MgoRoutersSpec           `json:"routers,omitempty"`
+	DefaultRWConcern *MgoDefaultRWConcernSpec `json:"defaultRWConcern,omitempty"`
+	Shards           map[string]*MgoShardSpec `json:"shards,omitempty"`
+	ConfigServer     MgoConfigServerSpec      `json:"configServer,omitempty"`
+	Routers          MgoRoutersSpec           `json:"routers,omitempty"`
 }
 
 // +kubebuilder:validation:Enum:=shard;router;configServer
@@ -49,6 +50,8 @@ const (
 // +kubebuilder:object:generate=true
 
 type MgoShardSpec struct {
+	NumSecondaryNodes uint16 `json:"numSecondaryNodes,omitempty"`
+	NumArbiterNodes   uint16 `json:"numArbiterNodes,omitempty"`
 	// +kubebuilder:default:=/data/db
 	DataPath string `json:"dataPath,omitempty"`
 	// +kubebuilder:default:=27018
@@ -77,6 +80,26 @@ type MgoRoutersSpec struct {
 	ServicePort uint16 `json:"servicePort,omitempty"`
 	// +kubebuilder:default:=27017
 	Port uint16 `json:"port,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+type MgoDefaultRWConcernSpec struct {
+	DefaultWriteConcern *MgoDefaultWriteConcernSpec `json:"defaultWriteConcern,omitempty"`
+	DefaultReadConcern  *MgoDefaultReadConcernSpec  `json:"defaultReadConcern,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+type MgoDefaultWriteConcernSpec struct {
+	W        string `json:"w,omitempty"`
+	Wtimeout int64  `json:"wtimeout,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+type MgoDefaultReadConcernSpec struct {
+	Level string `json:"level,omitempty"`
 }
 
 // MongoDBClusterStatus defines the observed state of MongoDBCluster.

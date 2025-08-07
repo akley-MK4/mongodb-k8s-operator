@@ -8,6 +8,7 @@ import (
 	"time"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
+	mongoclient "github.com/akley-MK4/mongodb-k8s-operator/pkg/mongo-client"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -116,7 +117,13 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 	}
 
 	// check the status if the rs is ready
+	uriList := FmtConfigServerMgoURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(), confSrvSpec.ReplicaSetId, confSrvSpec.NumReplicas, confSrvSpec.Port)
+	if err := mongoclient.CheckAndInitiateMgoConfigServerReplicaSet(confSrvSpec.ReplicaSetId, uriList[0], uriList[1:], log); err != nil {
+		log.Error(err, "Failed to check and initiate the mongodb config server", "replicaSetId", confSrvSpec.ReplicaSetId)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
 
+	log.Info("Successfully initialized the mongodb congfig server", "replicaSetId", confSrvSpec.ReplicaSetId)
 	return ctrl.Result{}, nil
 }
 
@@ -220,7 +227,7 @@ func FmtConfigServerServiceName(clusterName, confReplicaSetId string) string {
 	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeConfigServer, confReplicaSetId)
 }
 
-func FmtConfigServerURIList(clusterName, ns, replicaSetId string, numReplicas int32, port uint16) (retURIs []string) {
+func FmtConfigServerMgoURIList(clusterName, ns, replicaSetId string, numReplicas int32, port uint16) (retURIs []string) {
 	svcName := FmtConfigServerServiceName(clusterName, replicaSetId)
 	statefulSetName := FmtConfigServerStatefulSetName(clusterName, replicaSetId)
 

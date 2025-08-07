@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
+	mongoclient "github.com/akley-MK4/mongodb-k8s-operator/pkg/mongo-client"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -21,17 +22,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	FixReplicas = int32(3)
-)
-
 func (r *MongoDBClusterReconciler) reconcileShards(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster) (ctrlRet ctrl.Result, retErr error) {
 	for replicaSetId, shardSpec := range mgoCluster.Spec.Shards {
 		if ctrlRet, retErr = r.reconcileShardHeadlessService(ctx, log, mgoCluster, *shardSpec, replicaSetId); retErr != nil {
 			return
 		}
 
-		if ctrlRet, retErr = r.reconcileShardStatefulSet(ctx, log, mgoCluster, *shardSpec, replicaSetId); retErr != nil {
+		if ctrlRet, retErr = r.reconcileShardStatefulSet(ctx, log, mgoCluster, *shardSpec, replicaSetId); retErr != nil || ctrlRet.RequeueAfter > 0 {
 			return
 		}
 	}
@@ -43,7 +40,7 @@ func (r *MongoDBClusterReconciler) reconcileShardHeadlessService(ctx context.Con
 	shardSpec mongodbv1.MgoShardSpec, replicaSetId string) (ctrl.Result, error) {
 
 	var svc corev1.Service
-	name := fmtComponentTypeObjectName(mgoCluster.GetName(), mongodbv1.ComponentTypeShard, replicaSetId)
+	name := FmtShardServiceName(mgoCluster.GetName(), replicaSetId)
 	key := client.ObjectKey{
 		Namespace: mgoCluster.GetNamespace(),
 		Name:      name,
@@ -89,7 +86,7 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 	var foundStatefulSet appsv1.StatefulSet
 	key := client.ObjectKey{
 		Namespace: mgoCluster.GetNamespace(),
-		Name:      fmtComponentTypeObjectName(mgoCluster.GetName(), mongodbv1.ComponentTypeShard, replicaSetId),
+		Name:      FmtShardStatefulSetName(mgoCluster.GetName(), replicaSetId),
 	}
 
 	if err := r.Get(ctx, key, &foundStatefulSet); err != nil {
@@ -105,8 +102,9 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 
 	}
 
-	if foundStatefulSet.Spec.Replicas == nil || (*foundStatefulSet.Spec.Replicas) != FixReplicas {
-		foundStatefulSet.Spec.Replicas = ptr.To(FixReplicas)
+	numReplicaSetNodes := CountNumShardReplicaSetNodes(shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
+	if foundStatefulSet.Spec.Replicas == nil || (*foundStatefulSet.Spec.Replicas) != numReplicaSetNodes {
+		foundStatefulSet.Spec.Replicas = ptr.To(numReplicaSetNodes)
 		if err := r.Update(ctx, &foundStatefulSet); err != nil {
 			if e := r.Get(ctx, key, &foundStatefulSet); e != nil {
 				return ctrl.Result{}, e
@@ -118,7 +116,15 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 		return ctrl.Result{RequeueAfter: time.Millisecond * 500}, nil
 	}
 
-	// check the status if the rs is ready
+	primaryURI, secondaryURIs, arbiterURIs := FmtShardMgoURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(),
+		replicaSetId, shardSpec.Port, shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
+
+	if err := mongoclient.CheckAndInitiateMgoShardReplicaSet(replicaSetId, primaryURI, secondaryURIs, arbiterURIs, log); err != nil {
+		log.Error(err, "Failed to check and initiate the mongodb shard", "replicaSetId", replicaSetId)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+
+	log.Info("Successfully initialized the mongodb shard", "replicaSetId", replicaSetId)
 
 	return ctrl.Result{}, nil
 }
@@ -155,7 +161,7 @@ func fmtComponentTypeObjectName(mgoClusterName string, componentType mongodbv1.C
 func (r *MongoDBClusterReconciler) newShardStatefulSet(mgoCluster *mongodbv1.MongoDBCluster,
 	shardSpec mongodbv1.MgoShardSpec, replicaSetId string) (*appsv1.StatefulSet, error) {
 
-	objectName := fmtComponentTypeObjectName(mgoCluster.GetName(), mongodbv1.ComponentTypeShard, replicaSetId)
+	objectName := FmtShardStatefulSetName(mgoCluster.GetName(), replicaSetId)
 	statefulSet := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      objectName,
@@ -163,11 +169,11 @@ func (r *MongoDBClusterReconciler) newShardStatefulSet(mgoCluster *mongodbv1.Mon
 		},
 
 		Spec: appsv1.StatefulSetSpec{
-			Replicas: ptr.To(FixReplicas),
+			Replicas: ptr.To(CountNumShardReplicaSetNodes(shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"component-type": string(mongodbv1.ComponentTypeShard)},
 			},
-			ServiceName: fmtComponentTypeObjectName(mgoCluster.GetName(), mongodbv1.ComponentTypeShard, replicaSetId),
+			ServiceName: FmtShardServiceName(mgoCluster.GetName(), replicaSetId),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -180,7 +186,6 @@ func (r *MongoDBClusterReconciler) newShardStatefulSet(mgoCluster *mongodbv1.Mon
 	}
 
 	var containers []corev1.Container
-
 	// mongodb
 	imageMongodb := mgoCluster.Spec.Images["mongodb"]
 	if imageMongodb == "" {
@@ -223,4 +228,42 @@ func (r *MongoDBClusterReconciler) newShardStatefulSet(mgoCluster *mongodbv1.Mon
 	statefulSet.Spec.Template.Spec.Containers = containers
 
 	return statefulSet, nil
+}
+
+func CountNumShardReplicaSetNodes(numSecondaryNodes, numArbiterNodes uint16) int32 {
+	return int32(1 + numSecondaryNodes + numArbiterNodes)
+}
+
+func FmtShardStatefulSetName(clusterName, confReplicaSetId string) string {
+	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeShard, confReplicaSetId)
+}
+
+func FmtShardServiceName(clusterName, confReplicaSetId string) string {
+	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeShard, confReplicaSetId)
+}
+
+func FmtShardMgoURIList(clusterName, ns, replicaSetId string, port uint16, numSecondaryNodes, numArbiterNodes uint16) (
+	retPrimaryURI string, retSecondaryURIs, retArbiterURIs []string) {
+
+	svcName := FmtShardServiceName(clusterName, replicaSetId)
+	statefulSetName := FmtShardStatefulSetName(clusterName, replicaSetId)
+
+	// Just for testing
+	k8sClusterDomain := "quick3"
+	numReplicaSetNodes := CountNumShardReplicaSetNodes(numSecondaryNodes, numArbiterNodes)
+
+	var uriList []string
+	for i := int32(0); i < numReplicaSetNodes; i++ {
+		podName := fmt.Sprintf("%s-%d", statefulSetName, i)
+		uriList = append(uriList, fmt.Sprintf("%s.%s.%s.svc.%s:%d", podName, svcName, ns, k8sClusterDomain, port))
+	}
+
+	if len(uriList) <= 0 {
+		return
+	}
+
+	retPrimaryURI = uriList[0]
+	retSecondaryURIs = uriList[1 : 1+numSecondaryNodes]
+	retArbiterURIs = uriList[1+numSecondaryNodes:]
+	return
 }
