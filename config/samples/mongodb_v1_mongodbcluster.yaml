@@ -9,7 +9,35 @@ spec:
   images:
     mongodb: mongodb/mongodb-community-server:7.0.11-ubuntu2204
   imagePullPolicy: IfNotPresent
-  resourceRequirements: {}
+  resourceRequirements:
+    shard:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 2Gi
+    configServer:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    router:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  dbConnTimeout: 2000000000
+  defaultRWConcern:
+    defaultWriteConcern:
+      w: majority
+      wtimeout: 60000
+    defaultReadConcern:
+      level: "majority"
   shards:
     shrs1:
       numSecondaryNodes: 2

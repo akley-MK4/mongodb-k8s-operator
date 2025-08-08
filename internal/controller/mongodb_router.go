@@ -114,20 +114,18 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 			if e := r.Get(ctx, key, &foundDeployment); e != nil {
 				return ctrl.Result{}, e
 			}
-
 			return ctrl.Result{}, err
 		}
-
 		return ctrl.Result{RequeueAfter: time.Millisecond * 500}, nil
 	}
 
-	routerMgoURI := FmtRouterMgoURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(), routersSpec.ServicePort)
+	routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), routersSpec.ServicePort)
 	for rsId, shardSpec := range mgoCluster.Spec.Shards {
-		primaryURI, secondaryURIs, arbiterURIs := FmtShardMgoURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(), rsId, shardSpec.Port,
+		primaryDBAddr, secondaryDBAddrs, arbiterDBAddrs := FmtShardMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(), rsId, shardSpec.Port,
 			shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
-		shardMgoURIs := append([]string{primaryURI}, secondaryURIs...)
-		shardMgoURIs = append(shardMgoURIs, arbiterURIs...)
-		if err := mongoclient.CheckAndAddShard(routerMgoURI, rsId, shardMgoURIs, log); err != nil {
+		shardDBAddrs := append([]string{primaryDBAddr}, secondaryDBAddrs...)
+		shardDBAddrs = append(shardDBAddrs, arbiterDBAddrs...)
+		if err := mongoclient.CheckAndAddShard(routerMgoAddr, rsId, shardDBAddrs, log); err != nil {
 			log.Error(err, "Failed to add a mongodb shard", "replicaSetId", rsId)
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
@@ -192,8 +190,8 @@ func (r *MongoDBClusterReconciler) newRouterDeployment(mgoCluster *mongodbv1.Mon
 		return nil, errors.New("the image of mongod is not configured")
 	}
 
-	confSrvURIList := FmtConfigServerMgoURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(), confSrvSpec.ReplicaSetId, confSrvSpec.NumReplicas, confSrvSpec.Port)
-	argConfDBURIList := confSrvSpec.ReplicaSetId + "/" + strings.Join(confSrvURIList, ",")
+	confSrvAddrs := FmtConfigServerMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(), confSrvSpec.ReplicaSetId, confSrvSpec.NumReplicas, confSrvSpec.Port)
+	argConfDBURIList := confSrvSpec.ReplicaSetId + "/" + strings.Join(confSrvAddrs, ",")
 
 	mongodContainer := corev1.Container{
 		Name:            "mongos",
@@ -238,7 +236,7 @@ func FmtRouterServiceName(clusterName string) string {
 	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeRouter, "")
 }
 
-func FmtRouterMgoURIList(clusterName, ns string, routerServicePort uint16) string {
+func FmtRouterMgoAddr(clusterName, ns string, routerServicePort uint16) string {
 	svcName := FmtRouterServiceName(clusterName)
 	// Just for testing
 	k8sClusterDomain := "quick3"

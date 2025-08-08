@@ -17,6 +17,8 @@ limitations under the License.
 package v1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -30,7 +32,8 @@ type MongoDBClusterSpec struct {
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
 
 	ResourceRequirements map[string]*corev1.ResourceRequirements `json:"resourceRequirements,omitempty"`
-
+	// +kubebuilder:default:=10000000000
+	DBConnTimeout    time.Duration            `json:"dbConnTimeout,format:string,omitempty"`
 	DefaultRWConcern *MgoDefaultRWConcernSpec `json:"defaultRWConcern,omitempty"`
 	Shards           map[string]*MgoShardSpec `json:"shards,omitempty"`
 	ConfigServer     MgoConfigServerSpec      `json:"configServer,omitempty"`

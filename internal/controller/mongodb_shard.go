@@ -99,7 +99,6 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 		}
 		log.Info(fmt.Sprintf("Successfully created a StatefulSet for shard %v", replicaSetId))
 		return ctrl.Result{}, nil
-
 	}
 
 	numReplicaSetNodes := CountNumShardReplicaSetNodes(shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
@@ -109,22 +108,28 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 			if e := r.Get(ctx, key, &foundStatefulSet); e != nil {
 				return ctrl.Result{}, e
 			}
-
 			return ctrl.Result{}, err
 		}
-
 		return ctrl.Result{RequeueAfter: time.Millisecond * 500}, nil
 	}
 
-	primaryURI, secondaryURIs, arbiterURIs := FmtShardMgoURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(),
+	// The pods of the replica set are reconciled, check or initialize the replica set
+	primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs := FmtShardMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(),
 		replicaSetId, shardSpec.Port, shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
 
-	if err := mongoclient.CheckAndInitiateMgoShardReplicaSet(replicaSetId, primaryURI, secondaryURIs, arbiterURIs, log); err != nil {
-		log.Error(err, "Failed to check and initiate the mongodb shard", "replicaSetId", replicaSetId)
-		return ctrl.Result{RequeueAfter: time.Second}, nil
+	if initialized, err := mongoclient.CheckMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs, log); err != nil {
+		log.Error(err, "Failed to check the shard", "replicaSetId", replicaSetId)
+		return ctrl.Result{}, nil
+	} else if initialized {
+		log.Info("The shard has already been initialized", "replicaSetId", replicaSetId)
+		return ctrl.Result{}, nil
 	}
 
-	log.Info("Successfully initialized the mongodb shard", "replicaSetId", replicaSetId)
+	if err := mongoclient.InitiateMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs, log); err != nil {
+		log.Error(err, "Failed to initiate the shard", "replicaSetId", replicaSetId)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+	log.Info("Successfully initialized the shard", "replicaSetId", replicaSetId)
 
 	return ctrl.Result{}, nil
 }
@@ -242,8 +247,8 @@ func FmtShardServiceName(clusterName, confReplicaSetId string) string {
 	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeShard, confReplicaSetId)
 }
 
-func FmtShardMgoURIList(clusterName, ns, replicaSetId string, port uint16, numSecondaryNodes, numArbiterNodes uint16) (
-	retPrimaryURI string, retSecondaryURIs, retArbiterURIs []string) {
+func FmtShardMgoAddrs(clusterName, ns, replicaSetId string, port uint16, numSecondaryNodes, numArbiterNodes uint16) (
+	retPrimaryAddr string, retSecondaryAddrs, retArbiterAddrs []string) {
 
 	svcName := FmtShardServiceName(clusterName, replicaSetId)
 	statefulSetName := FmtShardStatefulSetName(clusterName, replicaSetId)
@@ -252,18 +257,18 @@ func FmtShardMgoURIList(clusterName, ns, replicaSetId string, port uint16, numSe
 	k8sClusterDomain := "quick3"
 	numReplicaSetNodes := CountNumShardReplicaSetNodes(numSecondaryNodes, numArbiterNodes)
 
-	var uriList []string
+	var addrs []string
 	for i := int32(0); i < numReplicaSetNodes; i++ {
 		podName := fmt.Sprintf("%s-%d", statefulSetName, i)
-		uriList = append(uriList, fmt.Sprintf("%s.%s.%s.svc.%s:%d", podName, svcName, ns, k8sClusterDomain, port))
+		addrs = append(addrs, fmt.Sprintf("%s.%s.%s.svc.%s:%d", podName, svcName, ns, k8sClusterDomain, port))
 	}
 
-	if len(uriList) <= 0 {
+	if len(addrs) <= 0 {
 		return
 	}
 
-	retPrimaryURI = uriList[0]
-	retSecondaryURIs = uriList[1 : 1+numSecondaryNodes]
-	retArbiterURIs = uriList[1+numSecondaryNodes:]
+	retPrimaryAddr = addrs[0]
+	retSecondaryAddrs = addrs[1 : 1+numSecondaryNodes]
+	retArbiterAddrs = addrs[1+numSecondaryNodes:]
 	return
 }

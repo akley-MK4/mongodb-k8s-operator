@@ -116,14 +116,23 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 		return ctrl.Result{RequeueAfter: time.Millisecond * 500}, nil
 	}
 
-	// check the status if the rs is ready
-	uriList := FmtConfigServerMgoURIList(mgoCluster.GetName(), mgoCluster.GetNamespace(), confSrvSpec.ReplicaSetId, confSrvSpec.NumReplicas, confSrvSpec.Port)
-	if err := mongoclient.CheckAndInitiateMgoConfigServerReplicaSet(confSrvSpec.ReplicaSetId, uriList[0], uriList[1:], log); err != nil {
-		log.Error(err, "Failed to check and initiate the mongodb config server", "replicaSetId", confSrvSpec.ReplicaSetId)
+	// The pods of the replica set are reconciled, check or initialize the replica set
+	mgoAddrs := FmtConfigServerMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(), confSrvSpec.ReplicaSetId, confSrvSpec.NumReplicas, confSrvSpec.Port)
+
+	if initialized, err := mongoclient.CheckMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, confSrvSpec.ReplicaSetId, mgoAddrs[0], mgoAddrs[1:], nil, log); err != nil {
+		log.Error(err, "Failed to check the config server", "replicaSetId", confSrvSpec.ReplicaSetId)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
+	} else if initialized {
+		log.Info("The config server has already been initialized", "replicaSetId", confSrvSpec.ReplicaSetId)
+		return ctrl.Result{}, nil
 	}
 
-	log.Info("Successfully initialized the mongodb congfig server", "replicaSetId", confSrvSpec.ReplicaSetId)
+	if err := mongoclient.InitiateMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, confSrvSpec.ReplicaSetId, mgoAddrs[0], mgoAddrs[1:], nil, log); err != nil {
+		log.Error(err, "Failed to initiate the config server", "replicaSetId", confSrvSpec.ReplicaSetId)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+	log.Info("Successfully initialized the config server", "replicaSetId", confSrvSpec.ReplicaSetId)
+
 	return ctrl.Result{}, nil
 }
 
@@ -227,7 +236,7 @@ func FmtConfigServerServiceName(clusterName, confReplicaSetId string) string {
 	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeConfigServer, confReplicaSetId)
 }
 
-func FmtConfigServerMgoURIList(clusterName, ns, replicaSetId string, numReplicas int32, port uint16) (retURIs []string) {
+func FmtConfigServerMgoAddrs(clusterName, ns, replicaSetId string, numReplicas int32, port uint16) (retAddrs []string) {
 	svcName := FmtConfigServerServiceName(clusterName, replicaSetId)
 	statefulSetName := FmtConfigServerStatefulSetName(clusterName, replicaSetId)
 
@@ -236,7 +245,7 @@ func FmtConfigServerMgoURIList(clusterName, ns, replicaSetId string, numReplicas
 
 	for i := 0; i < int(numReplicas); i++ {
 		podName := fmt.Sprintf("%s-%d", statefulSetName, i)
-		retURIs = append(retURIs, fmt.Sprintf("%s.%s.%s.svc.%s:%d", podName, svcName, ns, k8sClusterDomain, port))
+		retAddrs = append(retAddrs, fmt.Sprintf("%s.%s.%s.svc.%s:%d", podName, svcName, ns, k8sClusterDomain, port))
 	}
 
 	return
