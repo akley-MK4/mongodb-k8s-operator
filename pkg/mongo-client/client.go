@@ -215,7 +215,56 @@ func InitiateMgoReplicaSet(dbConnTimeout time.Duration, replicaSetId, primaryMgo
 	return nil
 }
 
-func CheckAndAddShard(routerMgoAddr, replicaSetId string, shardMgoAddrs []string, log logr.Logger) error {
+func CheckMgoShard(routerMgoAddr, replicaSetId string, shardMgoAddrs []string, log logr.Logger) (retExist bool, retErr error) {
+	mgoURI := fmt.Sprintf("mongodb://%s/?directConnection=true", routerMgoAddr)
+	client, errConn := mongo.Connect(options.Client().ApplyURI(mgoURI))
+	if errConn != nil {
+		retErr = fmt.Errorf("mongo.Connect failed, %v", errConn)
+		return
+	}
+	defer func() {
+		if err := client.Disconnect(context.Background()); err != nil {
+			log.Error(err, "Failed to disconnect a mgo client")
+		}
+	}()
+
+	adminDB := client.Database("admin")
+
+	retCheckSh := adminDB.RunCommand(context.TODO(), bson.D{bson.E{Key: "listShards", Value: 1}})
+	var bsonD bson.M
+	if err := retCheckSh.Decode(&bsonD); err != nil {
+		retErr = err
+		return
+	}
+
+	if bsonD["ok"].(float64) != 1 {
+		retErr = fmt.Errorf("cmd failed, %v", bsonD["errmsg"])
+		return
+	}
+
+	shards, ok := bsonD["shards"].(bson.A)
+	if !ok {
+		retErr = errors.New("unable to convert shards to type bson.A")
+		return
+	}
+
+	for _, iShard := range shards {
+		rsId, existRsId := FindBsonEValueInBsonD("_id", iShard.(bson.D))
+		if existRsId && rsId.(string) == replicaSetId {
+			retExist = true
+			if shState, exit := FindBsonEValueInBsonD("state", iShard.(bson.D)); !exit {
+				retErr = errors.New("the state field does not exist")
+			} else if shState.(int32) != 1 {
+				retErr = fmt.Errorf("the status of this shard is %v, not 1", shState)
+			}
+			return
+		}
+	}
+
+	return
+}
+
+func AddMgoShard(routerMgoAddr, replicaSetId string, shardMgoAddrs []string, log logr.Logger) error {
 	mgoURI := fmt.Sprintf("mongodb://%s/?directConnection=true", routerMgoAddr)
 	client, errConn := mongo.Connect(options.Client().ApplyURI(mgoURI))
 	if errConn != nil {
@@ -237,4 +286,14 @@ func CheckAndAddShard(routerMgoAddr, replicaSetId string, shardMgoAddrs []string
 	}
 
 	return nil
+}
+
+func FindBsonEValueInBsonD(key string, bsonD bson.D) (interface{}, bool) {
+	for _, bsonE := range bsonD {
+		if bsonE.Key == key {
+			return bsonE.Value, true
+		}
+	}
+
+	return nil, false
 }

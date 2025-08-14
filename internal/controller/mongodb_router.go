@@ -121,16 +121,23 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 
 	routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), routersSpec.ServicePort)
 	for rsId, shardSpec := range mgoCluster.Spec.Shards {
-		primaryDBAddr, secondaryDBAddrs, arbiterDBAddrs := FmtShardMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(), rsId, shardSpec.Port,
+		shPrimaryMgoAddr, shSecMgoAddrs, shArbMgoAddrs := FmtShardMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(), rsId, shardSpec.Port,
 			shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
-		shardDBAddrs := append([]string{primaryDBAddr}, secondaryDBAddrs...)
-		shardDBAddrs = append(shardDBAddrs, arbiterDBAddrs...)
-		if err := mongoclient.CheckAndAddShard(routerMgoAddr, rsId, shardDBAddrs, log); err != nil {
-			log.Error(err, "Failed to add a mongodb shard", "replicaSetId", rsId)
+		shardDBAddrs := append([]string{shPrimaryMgoAddr}, shSecMgoAddrs...)
+		shardDBAddrs = append(shardDBAddrs, shArbMgoAddrs...)
+		if exist, err := mongoclient.CheckMgoShard(routerMgoAddr, rsId, shardDBAddrs, log); err != nil {
+			log.Error(err, "Failed to check the shard in the mongodb cluster", "replicaSetId", rsId, "exist", exist)
 			return ctrl.Result{RequeueAfter: time.Second}, nil
+		} else if exist {
+			log.Info("The shard already exists in the mongodb cluster", "replicaSetId", rsId)
+			return ctrl.Result{}, nil
 		}
 
-		log.Info("Successfully add a mongodb shard", "replicaSetId", rsId)
+		if err := mongoclient.AddMgoShard(routerMgoAddr, rsId, shardDBAddrs, log); err != nil {
+			log.Error(err, "Unable to add the shard to the mongodb cluster on the router", "replicaSetId", rsId)
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
+		log.Info("Successfully add the mongodb shard to the mongodb cluster", "replicaSetId", rsId)
 	}
 
 	return ctrl.Result{}, nil

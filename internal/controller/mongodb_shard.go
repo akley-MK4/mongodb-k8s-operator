@@ -118,18 +118,18 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 		replicaSetId, shardSpec.Port, shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
 
 	if initialized, err := mongoclient.CheckMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs, log); err != nil {
-		log.Error(err, "Failed to check the shard", "replicaSetId", replicaSetId)
+		log.Error(err, "Failed to check the replica set of shard", "replicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
 	} else if initialized {
-		log.Info("The shard has already been initialized", "replicaSetId", replicaSetId)
+		log.Info("The replica set of shard has already been initialized", "replicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
 	}
 
 	if err := mongoclient.InitiateMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs, log); err != nil {
-		log.Error(err, "Failed to initiate the shard", "replicaSetId", replicaSetId)
+		log.Error(err, "Failed to initiate the replica set of shard", "replicaSetId", replicaSetId)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
-	log.Info("Successfully initialized the shard", "replicaSetId", replicaSetId)
+	log.Info("Successfully initialized the replica set of shard", "replicaSetId", replicaSetId)
 
 	return ctrl.Result{}, nil
 }
