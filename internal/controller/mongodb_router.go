@@ -77,8 +77,10 @@ func (r *MongoDBClusterReconciler) reconcileRouterService(ctx context.Context, l
 			return ctrl.Result{}, fmt.Errorf("create failed, %v", e)
 		}
 
-		log.Info(fmt.Sprintf("Successfully created a service for %v", mongodbv1.ComponentTypeRouter))
+		log.Info("Successfully created a service for router")
 		return ctrl.Result{}, nil
+	} else {
+		log.Info("The service of router exists")
 	}
 
 	return ctrl.Result{}, nil
@@ -103,9 +105,10 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 		if e := r.createRouterDeployment(ctx, mgoCluster); e != nil {
 			return ctrl.Result{}, e
 		}
-		log.Info(fmt.Sprintf("Successfully created a deployment for %v", mongodbv1.ComponentTypeRouter))
+		log.Info("Successfully created a deployment for router")
 		return ctrl.Result{}, nil
-
+	} else {
+		log.Info("The deployment of router exists")
 	}
 
 	if foundDeployment.Spec.Replicas == nil || (*foundDeployment.Spec.Replicas) != routersSpec.NumReplicas {

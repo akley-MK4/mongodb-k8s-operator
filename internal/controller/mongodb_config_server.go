@@ -72,8 +72,10 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerService(ctx context.Cont
 			return ctrl.Result{}, fmt.Errorf("create failed, %v", e)
 		}
 
-		log.Info(fmt.Sprintf("Successfully created a service for %v %v", mongodbv1.ComponentTypeConfigServer, confSrvSpec.ReplicaSetId))
+		log.Info("Successfully created a service for config server", "ReplicaSetId", confSrvSpec.ReplicaSetId)
 		return ctrl.Result{}, nil
+	} else {
+		log.Info("The service of config server exists", "ReplicaSetId", confSrvSpec.ReplicaSetId)
 	}
 
 	return ctrl.Result{}, nil
@@ -98,9 +100,10 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 		if e := r.createConfigServerStatefulSet(ctx, mgoCluster); e != nil {
 			return ctrl.Result{}, e
 		}
-		log.Info(fmt.Sprintf("Successfully created a StatefulSet for the config server %v", confSrvSpec.ReplicaSetId))
+		log.Info("Successfully created a stateful set for config server", "ReplicaSetId", confSrvSpec.ReplicaSetId)
 		return ctrl.Result{}, nil
-
+	} else {
+		log.Info("The stateful set of config server exists", "ReplicaSetId", confSrvSpec.ReplicaSetId)
 	}
 
 	if foundStatefulSet.Spec.Replicas == nil || (*foundStatefulSet.Spec.Replicas) != confSrvSpec.NumReplicas {
@@ -109,7 +112,6 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 			if e := r.Get(ctx, key, &foundStatefulSet); e != nil {
 				return ctrl.Result{}, e
 			}
-
 			return ctrl.Result{}, err
 		}
 
@@ -120,18 +122,18 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 	mgoAddrs := FmtConfigServerMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(), confSrvSpec.ReplicaSetId, confSrvSpec.NumReplicas, confSrvSpec.Port)
 
 	if initialized, err := mongoclient.CheckMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, confSrvSpec.ReplicaSetId, mgoAddrs[0], mgoAddrs[1:], nil, log); err != nil {
-		log.Error(err, "Failed to check the config server", "replicaSetId", confSrvSpec.ReplicaSetId)
+		log.Error(err, "Failed to check the the replica set of config server", "ReplicaSetId", confSrvSpec.ReplicaSetId)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	} else if initialized {
-		log.Info("The config server has already been initialized", "replicaSetId", confSrvSpec.ReplicaSetId)
+		log.Info("The replica set of config server has already been initialized", "ReplicaSetId", confSrvSpec.ReplicaSetId)
 		return ctrl.Result{}, nil
 	}
 
 	if err := mongoclient.InitiateMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, confSrvSpec.ReplicaSetId, mgoAddrs[0], mgoAddrs[1:], nil, log); err != nil {
-		log.Error(err, "Failed to initiate the config server", "replicaSetId", confSrvSpec.ReplicaSetId)
+		log.Error(err, "Failed to initiate the replica set of config server", "ReplicaSetId", confSrvSpec.ReplicaSetId)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
-	log.Info("Successfully initialized the config server", "replicaSetId", confSrvSpec.ReplicaSetId)
+	log.Info("Successfully initialized the replica set of config server", "ReplicaSetId", confSrvSpec.ReplicaSetId)
 
 	return ctrl.Result{}, nil
 }

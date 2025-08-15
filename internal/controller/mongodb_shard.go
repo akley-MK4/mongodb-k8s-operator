@@ -73,8 +73,10 @@ func (r *MongoDBClusterReconciler) reconcileShardHeadlessService(ctx context.Con
 			return ctrl.Result{}, fmt.Errorf("create failed, %v", e)
 		}
 
-		log.Info(fmt.Sprintf("Successfully created a headless service for %v %v", mongodbv1.ComponentTypeShard, replicaSetId))
+		log.Info("Successfully created a service for shard", "ReplicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
+	} else {
+		log.Info("The service of shard exists", "ReplicaSetId", replicaSetId)
 	}
 
 	return ctrl.Result{}, nil
@@ -97,8 +99,10 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 		if e := r.createShardStatefulSet(ctx, mgoCluster, shardSpec, replicaSetId); e != nil {
 			return ctrl.Result{}, e
 		}
-		log.Info(fmt.Sprintf("Successfully created a StatefulSet for shard %v", replicaSetId))
+		log.Info("Successfully created a stateful set for shard", "ReplicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
+	} else {
+		log.Info("The stateful set of shard exists", "ReplicaSetId", replicaSetId)
 	}
 
 	numReplicaSetNodes := CountNumShardReplicaSetNodes(shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
@@ -118,18 +122,18 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 		replicaSetId, shardSpec.Port, shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
 
 	if initialized, err := mongoclient.CheckMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs, log); err != nil {
-		log.Error(err, "Failed to check the replica set of shard", "replicaSetId", replicaSetId)
+		log.Error(err, "Failed to check the replica set of shard", "ReplicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
 	} else if initialized {
-		log.Info("The replica set of shard has already been initialized", "replicaSetId", replicaSetId)
+		log.Info("The replica set of shard has already been initialized", "ReplicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
 	}
 
 	if err := mongoclient.InitiateMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs, log); err != nil {
-		log.Error(err, "Failed to initiate the replica set of shard", "replicaSetId", replicaSetId)
+		log.Error(err, "Failed to initiate the replica set of shard", "ReplicaSetId", replicaSetId)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
-	log.Info("Successfully initialized the replica set of shard", "replicaSetId", replicaSetId)
+	log.Info("Successfully initialized the replica set of shard", "ReplicaSetId", replicaSetId)
 
 	return ctrl.Result{}, nil
 }
