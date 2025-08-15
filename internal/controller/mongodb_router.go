@@ -24,10 +24,12 @@ import (
 
 func (r *MongoDBClusterReconciler) reconcileRouters(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster) (ctrlRet ctrl.Result, retErr error) {
 	if ctrlRet, retErr = r.reconcileRouterService(ctx, log, mgoCluster); retErr != nil {
+		retErr = fmt.Errorf("resource: Service, error: %v", retErr)
 		return
 	}
 
 	if ctrlRet, retErr = r.reconcileRouterDeployment(ctx, log, mgoCluster); retErr != nil {
+		retErr = fmt.Errorf("resource: Deployment, error: %v", retErr)
 		return
 	}
 
@@ -48,7 +50,7 @@ func (r *MongoDBClusterReconciler) reconcileRouterService(ctx context.Context, l
 
 	if err := r.Get(ctx, key, &svc); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("unable to get the service, %v", err)
 		}
 
 		svc.ObjectMeta.Name = name
@@ -70,15 +72,17 @@ func (r *MongoDBClusterReconciler) reconcileRouterService(ctx context.Context, l
 		svc.Spec.Ports = append(svc.Spec.Ports, routeSvcPort)
 
 		if e := ctrl.SetControllerReference(mgoCluster, &svc, r.Scheme); e != nil {
-			return ctrl.Result{}, fmt.Errorf("SetControllerReference failed, %v", e)
+			return ctrl.Result{}, fmt.Errorf("unable to set the controller reference, %v", e)
 		}
 
 		if e := r.Create(ctx, &svc); e != nil {
-			return ctrl.Result{}, fmt.Errorf("create failed, %v", e)
+			return ctrl.Result{}, fmt.Errorf("unable to create the service, %v", e)
 		}
 
-		log.Info(fmt.Sprintf("Successfully created a service for %v", mongodbv1.ComponentTypeRouter))
+		log.Info("Successfully created a service for the routers")
 		return ctrl.Result{}, nil
+	} else {
+		log.Info("The service exists for the routers")
 	}
 
 	return ctrl.Result{}, nil
@@ -97,26 +101,24 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 
 	if err := r.Get(ctx, key, &foundDeployment); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("unable to get the deployment, %v", err)
 		}
 
 		if e := r.createRouterDeployment(ctx, mgoCluster); e != nil {
 			return ctrl.Result{}, e
 		}
-		log.Info(fmt.Sprintf("Successfully created a deployment for %v", mongodbv1.ComponentTypeRouter))
+		log.Info("Successfully created a deployment for the routers")
 		return ctrl.Result{}, nil
-
+	} else {
+		log.Info("The deployment exists for the routers")
 	}
 
 	if foundDeployment.Spec.Replicas == nil || (*foundDeployment.Spec.Replicas) != routersSpec.NumReplicas {
 		foundDeployment.Spec.Replicas = ptr.To(routersSpec.NumReplicas)
 		if err := r.Update(ctx, &foundDeployment); err != nil {
-			if e := r.Get(ctx, key, &foundDeployment); e != nil {
-				return ctrl.Result{}, e
-			}
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("unable to update the deployment found, %v", err)
 		}
-		return ctrl.Result{RequeueAfter: time.Millisecond * 500}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), routersSpec.ServicePort)
@@ -126,18 +128,18 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 		shardDBAddrs := append([]string{shPrimaryMgoAddr}, shSecMgoAddrs...)
 		shardDBAddrs = append(shardDBAddrs, shArbMgoAddrs...)
 		if exist, err := mongoclient.CheckMgoShard(routerMgoAddr, rsId, shardDBAddrs, log); err != nil {
-			log.Error(err, "Failed to check the shard in the mongodb cluster", "replicaSetId", rsId, "exist", exist)
-			return ctrl.Result{RequeueAfter: time.Second}, nil
+			return ctrl.Result{RequeueAfter: time.Second},
+				fmt.Errorf("an error occurred while checking the shard %v in the mongodb cluster, %v", rsId, err)
 		} else if exist {
-			log.Info("The shard already exists in the mongodb cluster", "replicaSetId", rsId)
+			log.Info("The shard was added to the mongodb cluster", "replicaSetId", rsId)
 			return ctrl.Result{}, nil
 		}
 
 		if err := mongoclient.AddMgoShard(routerMgoAddr, rsId, shardDBAddrs, log); err != nil {
-			log.Error(err, "Unable to add the shard to the mongodb cluster on the router", "replicaSetId", rsId)
-			return ctrl.Result{RequeueAfter: time.Second}, nil
+			return ctrl.Result{RequeueAfter: time.Second},
+				fmt.Errorf("an error occurred while adding the shard %v to the mongodb cluster, %v", rsId, err)
 		}
-		log.Info("Successfully add the mongodb shard to the mongodb cluster", "replicaSetId", rsId)
+		log.Info("Successfully added the shard to the mongodb cluster", "replicaSetId", rsId)
 	}
 
 	return ctrl.Result{}, nil
@@ -146,17 +148,17 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 func (r *MongoDBClusterReconciler) createRouterDeployment(ctx context.Context, mgoCluster *mongodbv1.MongoDBCluster) (retErr error) {
 	deployment, errDeployment := r.newRouterDeployment(mgoCluster)
 	if errDeployment != nil {
-		retErr = fmt.Errorf("newRouterDeployment failed, %v", errDeployment)
+		retErr = fmt.Errorf("unable to create a data object with type Deployment, %v", errDeployment)
 		return
 	}
 
 	if e := ctrl.SetControllerReference(mgoCluster, deployment, r.Scheme); e != nil {
-		retErr = fmt.Errorf("setControllerReference failed, %v", e)
+		retErr = fmt.Errorf("unable to set the controller reference, %v", e)
 		return
 	}
 
 	if e := r.Create(ctx, deployment); e != nil {
-		retErr = fmt.Errorf("create failed, %v", e)
+		retErr = fmt.Errorf("unable to create a deployment, %v", e)
 		return
 	}
 
