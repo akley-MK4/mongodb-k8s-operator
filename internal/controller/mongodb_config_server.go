@@ -23,10 +23,12 @@ import (
 
 func (r *MongoDBClusterReconciler) reconcileConfigServer(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster) (ctrlRet ctrl.Result, retErr error) {
 	if ctrlRet, retErr = r.reconcileConfigServerService(ctx, log, mgoCluster); retErr != nil {
+		retErr = fmt.Errorf("resource: Service, replicaSetId: %v, error: %v", mgoCluster.Spec.ConfigServer.ReplicaSetId, retErr)
 		return
 	}
 
 	if ctrlRet, retErr = r.reconcileConfigServerStatefulSet(ctx, log, mgoCluster); retErr != nil {
+		retErr = fmt.Errorf("resource: StatefulSet, replicaSetId: %v, error: %v", mgoCluster.Spec.ConfigServer.ReplicaSetId, retErr)
 		return
 	}
 
@@ -47,7 +49,7 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerService(ctx context.Cont
 
 	if err := r.Get(ctx, key, &svc); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("unable to get the service, %v", err)
 		}
 
 		svc.ObjectMeta.Name = svcName
@@ -65,17 +67,17 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerService(ctx context.Cont
 		})
 
 		if e := ctrl.SetControllerReference(mgoCluster, &svc, r.Scheme); e != nil {
-			return ctrl.Result{}, fmt.Errorf("SetControllerReference failed, %v", e)
+			return ctrl.Result{}, fmt.Errorf("unable to set the controller reference, %v", e)
 		}
 
 		if e := r.Create(ctx, &svc); e != nil {
-			return ctrl.Result{}, fmt.Errorf("create failed, %v", e)
+			return ctrl.Result{}, fmt.Errorf("unable to create a service, %v", e)
 		}
 
-		log.Info("Successfully created a service for config server", "ReplicaSetId", confSrvSpec.ReplicaSetId)
+		log.Info("Successfully created a service for config server", "replicaSetId", confSrvSpec.ReplicaSetId)
 		return ctrl.Result{}, nil
 	} else {
-		log.Info("The service of config server exists", "ReplicaSetId", confSrvSpec.ReplicaSetId)
+		log.Info("The service of config server exists", "replicaSetId", confSrvSpec.ReplicaSetId)
 	}
 
 	return ctrl.Result{}, nil
@@ -94,46 +96,41 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 
 	if err := r.Get(ctx, key, &foundStatefulSet); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("unable to get the stateful set, %v", err)
 		}
 
 		if e := r.createConfigServerStatefulSet(ctx, mgoCluster); e != nil {
 			return ctrl.Result{}, e
 		}
-		log.Info("Successfully created a stateful set for config server", "ReplicaSetId", confSrvSpec.ReplicaSetId)
+		log.Info("Successfully created a stateful set for config server", "replicaSetId", confSrvSpec.ReplicaSetId)
 		return ctrl.Result{}, nil
 	} else {
-		log.Info("The stateful set of config server exists", "ReplicaSetId", confSrvSpec.ReplicaSetId)
+		log.Info("The stateful set of config server exists", "replicaSetId", confSrvSpec.ReplicaSetId)
 	}
 
 	if foundStatefulSet.Spec.Replicas == nil || (*foundStatefulSet.Spec.Replicas) != confSrvSpec.NumReplicas {
 		foundStatefulSet.Spec.Replicas = ptr.To(confSrvSpec.NumReplicas)
 		if err := r.Update(ctx, &foundStatefulSet); err != nil {
-			if e := r.Get(ctx, key, &foundStatefulSet); e != nil {
-				return ctrl.Result{}, e
-			}
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("unable to update the stateful set, %v", err)
 		}
-
-		return ctrl.Result{RequeueAfter: time.Millisecond * 500}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	// The pods of the replica set are reconciled, check or initialize the replica set
 	mgoAddrs := FmtConfigServerMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(), confSrvSpec.ReplicaSetId, confSrvSpec.NumReplicas, confSrvSpec.Port)
 
 	if initialized, err := mongoclient.CheckMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, confSrvSpec.ReplicaSetId, mgoAddrs[0], mgoAddrs[1:], nil, log); err != nil {
-		log.Error(err, "Failed to check the the replica set of config server", "ReplicaSetId", confSrvSpec.ReplicaSetId)
-		return ctrl.Result{RequeueAfter: time.Second}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, fmt.Errorf("an error occurred while checking the replica set of config server in the mongodb cluster, %v", err)
 	} else if initialized {
-		log.Info("The replica set of config server has already been initialized", "ReplicaSetId", confSrvSpec.ReplicaSetId)
+		log.Info("The replica set of config server has already been initialized in the mongodb cluster", "replicaSetId", confSrvSpec.ReplicaSetId)
 		return ctrl.Result{}, nil
 	}
 
 	if err := mongoclient.InitiateMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, confSrvSpec.ReplicaSetId, mgoAddrs[0], mgoAddrs[1:], nil, log); err != nil {
-		log.Error(err, "Failed to initiate the replica set of config server", "ReplicaSetId", confSrvSpec.ReplicaSetId)
-		return ctrl.Result{RequeueAfter: time.Second}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, fmt.Errorf("an error occurred while initializing the replica set of config server in the mongodb cluster, %v",
+			err)
 	}
-	log.Info("Successfully initialized the replica set of config server", "ReplicaSetId", confSrvSpec.ReplicaSetId)
+	log.Info("Successfully initialized the replica set of config server", "replicaSetId", confSrvSpec.ReplicaSetId)
 
 	return ctrl.Result{}, nil
 }
@@ -141,17 +138,17 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 func (r *MongoDBClusterReconciler) createConfigServerStatefulSet(ctx context.Context, mgoCluster *mongodbv1.MongoDBCluster) (retErr error) {
 	statefulSet, errStatefulSet := r.newConfigServerStatefulSet(mgoCluster)
 	if errStatefulSet != nil {
-		retErr = fmt.Errorf("newShardStatefulSet failed, %v", errStatefulSet)
+		retErr = fmt.Errorf("unable to create a data object with type StatefulSet, %v", errStatefulSet)
 		return
 	}
 
 	if e := ctrl.SetControllerReference(mgoCluster, statefulSet, r.Scheme); e != nil {
-		retErr = fmt.Errorf("setControllerReference failed, %v", e)
+		retErr = fmt.Errorf("unable to set the controller reference, %v", e)
 		return
 	}
 
 	if e := r.Create(ctx, statefulSet); e != nil {
-		retErr = fmt.Errorf("create failed, %v", e)
+		retErr = fmt.Errorf("unable to create a stateful set, %v", e)
 		return
 	}
 

@@ -25,10 +25,12 @@ import (
 func (r *MongoDBClusterReconciler) reconcileShards(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster) (ctrlRet ctrl.Result, retErr error) {
 	for replicaSetId, shardSpec := range mgoCluster.Spec.Shards {
 		if ctrlRet, retErr = r.reconcileShardHeadlessService(ctx, log, mgoCluster, *shardSpec, replicaSetId); retErr != nil {
+			retErr = fmt.Errorf("resource: Service, replicaSetId: %v, error: %v", replicaSetId, retErr)
 			return
 		}
 
 		if ctrlRet, retErr = r.reconcileShardStatefulSet(ctx, log, mgoCluster, *shardSpec, replicaSetId); retErr != nil || ctrlRet.RequeueAfter > 0 {
+			retErr = fmt.Errorf("resource: StatefulSet, replicaSetId: %v, error: %v", replicaSetId, retErr)
 			return
 		}
 	}
@@ -48,7 +50,7 @@ func (r *MongoDBClusterReconciler) reconcileShardHeadlessService(ctx context.Con
 
 	if err := r.Get(ctx, key, &svc); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("unable to get the service, %v", err)
 		}
 
 		svc.ObjectMeta.Name = name
@@ -66,17 +68,17 @@ func (r *MongoDBClusterReconciler) reconcileShardHeadlessService(ctx context.Con
 		})
 
 		if e := ctrl.SetControllerReference(mgoCluster, &svc, r.Scheme); e != nil {
-			return ctrl.Result{}, fmt.Errorf("SetControllerReference failed, %v", e)
+			return ctrl.Result{}, fmt.Errorf("unable to set the controller reference, %v", e)
 		}
 
 		if e := r.Create(ctx, &svc); e != nil {
-			return ctrl.Result{}, fmt.Errorf("create failed, %v", e)
+			return ctrl.Result{}, fmt.Errorf("unable to create a service, %v", e)
 		}
 
-		log.Info("Successfully created a service for shard", "ReplicaSetId", replicaSetId)
+		log.Info("Successfully created a service for shard", "replicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
 	} else {
-		log.Info("The service of shard exists", "ReplicaSetId", replicaSetId)
+		log.Info("The service of shard exists", "replicaSetId", replicaSetId)
 	}
 
 	return ctrl.Result{}, nil
@@ -93,28 +95,25 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 
 	if err := r.Get(ctx, key, &foundStatefulSet); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("unnable to get the stateful set, %v", err)
 		}
 
 		if e := r.createShardStatefulSet(ctx, mgoCluster, shardSpec, replicaSetId); e != nil {
 			return ctrl.Result{}, e
 		}
-		log.Info("Successfully created a stateful set for shard", "ReplicaSetId", replicaSetId)
+		log.Info("Successfully created a stateful set for shard", "replicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
 	} else {
-		log.Info("The stateful set of shard exists", "ReplicaSetId", replicaSetId)
+		log.Info("The stateful set of shard exists", "replicaSetId", replicaSetId)
 	}
 
 	numReplicaSetNodes := CountNumShardReplicaSetNodes(shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
 	if foundStatefulSet.Spec.Replicas == nil || (*foundStatefulSet.Spec.Replicas) != numReplicaSetNodes {
 		foundStatefulSet.Spec.Replicas = ptr.To(numReplicaSetNodes)
 		if err := r.Update(ctx, &foundStatefulSet); err != nil {
-			if e := r.Get(ctx, key, &foundStatefulSet); e != nil {
-				return ctrl.Result{}, e
-			}
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("unable to update the stateful set found, %v", err)
 		}
-		return ctrl.Result{RequeueAfter: time.Millisecond * 500}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	// The pods of the replica set are reconciled, check or initialize the replica set
@@ -122,18 +121,18 @@ func (r *MongoDBClusterReconciler) reconcileShardStatefulSet(ctx context.Context
 		replicaSetId, shardSpec.Port, shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
 
 	if initialized, err := mongoclient.CheckMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs, log); err != nil {
-		log.Error(err, "Failed to check the replica set of shard", "ReplicaSetId", replicaSetId)
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: time.Second},
+			fmt.Errorf("an error occurred while checking the replica set of shard in the mongodb cluster, %v", err)
 	} else if initialized {
-		log.Info("The replica set of shard has already been initialized", "ReplicaSetId", replicaSetId)
+		log.Info("The replica set of shard has already been initialized in the mongodb cluster", "replicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
 	}
 
 	if err := mongoclient.InitiateMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs, log); err != nil {
-		log.Error(err, "Failed to initiate the replica set of shard", "ReplicaSetId", replicaSetId)
-		return ctrl.Result{RequeueAfter: time.Second}, nil
+		return ctrl.Result{RequeueAfter: time.Second},
+			fmt.Errorf("an error occurred while initializing the replica set of shard in the mongodb cluster, %v", err)
 	}
-	log.Info("Successfully initialized the replica set of shard", "ReplicaSetId", replicaSetId)
+	log.Info("Successfully initialized the replica set of shard", "replicaSetId", replicaSetId)
 
 	return ctrl.Result{}, nil
 }
@@ -143,17 +142,17 @@ func (r *MongoDBClusterReconciler) createShardStatefulSet(ctx context.Context, m
 
 	statefulSet, errStatefulSet := r.newShardStatefulSet(mgoCluster, shardSpec, replicaSetId)
 	if errStatefulSet != nil {
-		retErr = fmt.Errorf("newShardStatefulSet failed, %v", errStatefulSet)
+		retErr = fmt.Errorf("unable to create a data object with type StatefulSet, %v", errStatefulSet)
 		return
 	}
 
 	if e := ctrl.SetControllerReference(mgoCluster, statefulSet, r.Scheme); e != nil {
-		retErr = fmt.Errorf("setControllerReference failed, %v", e)
+		retErr = fmt.Errorf("unable to set the controller reference, %v", e)
 		return
 	}
 
 	if e := r.Create(ctx, statefulSet); e != nil {
-		retErr = fmt.Errorf("create failed, %v", e)
+		retErr = fmt.Errorf("unable to create a stateful set, %v", e)
 		return
 	}
 

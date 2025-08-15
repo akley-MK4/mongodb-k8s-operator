@@ -64,59 +64,54 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if len(mgoCluster.Status.Conditions) == 0 {
 		meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available", Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
-		if err := r.Status().Update(ctx, mgoCluster); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		if err := r.Get(ctx, req.NamespacedName, mgoCluster); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, r.Status().Update(ctx, mgoCluster)
 	}
 
 	defer func() {
+		if err := r.Get(ctx, req.NamespacedName, mgoCluster); err != nil {
+			log.Error(err, "Unable to get the mgoCluster resource")
+			return
+		}
+
 		if retErr != nil {
 			meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available",
 				Status: metav1.ConditionFalse, Reason: "Reconciling",
 				Message: retErr.Error(),
 			})
+		} else if retCtrl.RequeueAfter <= 0 {
+			meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available",
+				Status: metav1.ConditionTrue, Reason: "Reconciling",
+				Message: "All components have been successfully deployed"})
+		}
 
-			if e := r.Status().Update(ctx, mgoCluster); e != nil {
-				return
-			}
+		if e := r.Status().Update(ctx, mgoCluster); e != nil {
+			log.Error(e, "Unable to update the status of the mgoCluster resource")
+			return
 		}
 	}()
 
-	if retCtrl, retErr = r.reconcileShards(ctx, log, mgoCluster); retErr != nil {
-		retErr = fmt.Errorf("reconcileShards failed, %v", retErr)
-		return
-	} else if retCtrl.RequeueAfter > 0 {
-		return
-	}
-
-	if retCtrl, retErr = r.reconcileConfigServer(ctx, log, mgoCluster); retErr != nil {
-		retErr = fmt.Errorf("reconcileConfigServer failed, %v", retErr)
-		return
-	} else if retCtrl.RequeueAfter > 0 {
+	if retCtrl, retErr = r.reconcileShards(ctx, log, mgoCluster); retErr != nil || retCtrl.RequeueAfter > 0 {
+		if retErr != nil {
+			retErr = fmt.Errorf("failed to reconcile the shards, %v", retErr)
+		}
 		return
 	}
 
-	if retCtrl, retErr = r.reconcileRouters(ctx, log, mgoCluster); retErr != nil {
-		retErr = fmt.Errorf("reconcileRouters failed, %v", retErr)
-		return
-	} else if retCtrl.RequeueAfter > 0 {
+	if retCtrl, retErr = r.reconcileConfigServer(ctx, log, mgoCluster); retErr != nil || retCtrl.RequeueAfter > 0 {
+		if retErr != nil {
+			retErr = fmt.Errorf("failed to reconcile the config servers, %v", retErr)
+		}
 		return
 	}
 
-	// The following implementation will update the status
-	meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available",
-		Status: metav1.ConditionTrue, Reason: "Reconciling",
-		Message: "All components have been successfully deployed"})
-
-	if err := r.Status().Update(ctx, mgoCluster); err != nil {
-		return ctrl.Result{}, err
+	if retCtrl, retErr = r.reconcileRouters(ctx, log, mgoCluster); retErr != nil || retCtrl.RequeueAfter > 0 {
+		if retErr != nil {
+			retErr = fmt.Errorf("failed to reconcile the routers, %v", retErr)
+		}
+		return
 	}
-	return ctrl.Result{}, nil
+
+	return
 }
 
 // SetupWithManager sets up the controller with the Manager.
