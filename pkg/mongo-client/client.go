@@ -115,12 +115,13 @@ func CheckMgoReplicaSet(dbConnTimeout time.Duration, replicaSetId, primaryMgoAdd
 					return
 				}
 			}
-			if e.Key == "stateStr" {
-				if e.Value.(string) != stateStr {
-					retErr = fmt.Errorf("the member's state is %v, which is inconsistent with the detected state %s", e.Value, stateStr)
-					return
-				}
-			}
+			// There is no need to check the stateStr as the node type may have changed
+			// if e.Key == "stateStr" {
+			// 	if e.Value.(string) != stateStr {
+			// 		retErr = fmt.Errorf("the member's state is %v, which is inconsistent with the detected state %s", e.Value, stateStr)
+			// 		return
+			// 	}
+			// }
 		}
 		return
 	}
