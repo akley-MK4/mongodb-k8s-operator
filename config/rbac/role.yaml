@@ -8,6 +8,7 @@ rules:
   - mongodb.akleymk4.com
   resources:
   - mongodbclusters
+  - mongodbshards
   verbs:
   - create
   - delete
@@ -20,12 +21,14 @@ rules:
   - mongodb.akleymk4.com
   resources:
   - mongodbclusters/finalizers
+  - mongodbshards/finalizers
   verbs:
   - update
 - apiGroups:
   - mongodb.akleymk4.com
   resources:
   - mongodbclusters/status
+  - mongodbshards/status
   verbs:
   - get
   - patch

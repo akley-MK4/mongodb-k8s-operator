@@ -38,10 +38,10 @@ spec:
       wtimeout: 60000
     defaultReadConcern:
       level: "majority"
-  shards:
-    shrs1:
-      numSecondaryNodes: 2
-      numArbiterNodes: 0
+  #shards:
+  #  shrs1:
+  #    numSecondaryNodes: 2
+  #    numArbiterNodes: 0
   configServer:
     replicaSetId: "confrs1"
     numReplicas: 3

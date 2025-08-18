@@ -9,7 +9,6 @@ import (
 	"time"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
-	mongoclient "github.com/akley-MK4/mongodb-k8s-operator/pkg/mongo-client"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -22,13 +21,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (r *MongoDBClusterReconciler) reconcileRouters(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster) (ctrlRet ctrl.Result, retErr error) {
-	if ctrlRet, retErr = r.reconcileRouterService(ctx, log, mgoCluster); retErr != nil {
+func (r *MongoDBClusterReconciler) reconcileRouters(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster) (retCtrl ctrl.Result, retErr error) {
+	if retCtrl, retErr = r.reconcileRouterService(ctx, log, mgoCluster); retErr != nil {
 		retErr = fmt.Errorf("resource: Service, error: %v", retErr)
 		return
 	}
 
-	if ctrlRet, retErr = r.reconcileRouterDeployment(ctx, log, mgoCluster); retErr != nil {
+	if retCtrl, retErr = r.reconcileRouterDeployment(ctx, log, mgoCluster); retErr != nil {
 		retErr = fmt.Errorf("resource: Deployment, error: %v", retErr)
 		return
 	}
@@ -119,27 +118,6 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 			return ctrl.Result{}, fmt.Errorf("unable to update the deployment found, %v", err)
 		}
 		return ctrl.Result{RequeueAfter: time.Second}, nil
-	}
-
-	routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), routersSpec.ServicePort)
-	for rsId, shardSpec := range mgoCluster.Spec.Shards {
-		shPrimaryMgoAddr, shSecMgoAddrs, shArbMgoAddrs := FmtShardMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(), rsId, shardSpec.Port,
-			shardSpec.NumSecondaryNodes, shardSpec.NumArbiterNodes)
-		shardDBAddrs := append([]string{shPrimaryMgoAddr}, shSecMgoAddrs...)
-		shardDBAddrs = append(shardDBAddrs, shArbMgoAddrs...)
-		if exist, err := mongoclient.CheckMgoShard(routerMgoAddr, rsId, shardDBAddrs, log); err != nil {
-			return ctrl.Result{RequeueAfter: time.Second},
-				fmt.Errorf("an error occurred while checking the shard %v in the mongodb cluster, %v", rsId, err)
-		} else if exist {
-			log.Info("The shard was added to the mongodb cluster", "replicaSetId", rsId)
-			return ctrl.Result{}, nil
-		}
-
-		if err := mongoclient.AddMgoShard(routerMgoAddr, rsId, shardDBAddrs, log); err != nil {
-			return ctrl.Result{RequeueAfter: time.Second},
-				fmt.Errorf("an error occurred while adding the shard %v to the mongodb cluster, %v", rsId, err)
-		}
-		log.Info("Successfully added the shard to the mongodb cluster", "replicaSetId", rsId)
 	}
 
 	return ctrl.Result{}, nil

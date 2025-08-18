@@ -90,13 +90,6 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}()
 
-	if retCtrl, retErr = r.reconcileShards(ctx, log, mgoCluster); retErr != nil || retCtrl.RequeueAfter > 0 {
-		if retErr != nil {
-			retErr = fmt.Errorf("failed to reconcile the shards, %v", retErr)
-		}
-		return
-	}
-
 	if retCtrl, retErr = r.reconcileConfigServer(ctx, log, mgoCluster); retErr != nil || retCtrl.RequeueAfter > 0 {
 		if retErr != nil {
 			retErr = fmt.Errorf("failed to reconcile the config servers, %v", retErr)

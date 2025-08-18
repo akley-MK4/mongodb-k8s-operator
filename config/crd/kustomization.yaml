@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/mongodb.akleymk4.com_mongodbclusters.yaml
+- bases/mongodb.akleymk4.com_mongodbshards.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

@@ -165,21 +165,6 @@ spec:
                       a service
                     type: string
                 type: object
-              shards:
-                additionalProperties:
-                  properties:
-                    dataPath:
-                      default: /data/db
-                      type: string
-                    numArbiterNodes:
-                      type: integer
-                    numSecondaryNodes:
-                      type: integer
-                    port:
-                      default: 27018
-                      type: integer
-                  type: object
-                type: object
             type: object
           status:
             description: status defines the observed state of MongoDBCluster
