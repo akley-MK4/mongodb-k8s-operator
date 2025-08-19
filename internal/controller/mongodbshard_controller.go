@@ -34,12 +34,17 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
 	mongoclient "github.com/akley-MK4/mongodb-k8s-operator/pkg/mongo-client"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	FinalizerMgoShard = "finalizer-shard"
 )
 
 // MongoDBShardReconciler reconciles a MongoDBShard object
@@ -83,17 +88,29 @@ func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	if !controllerutil.ContainsFinalizer(mgoShard, FinalizerMgoShard) {
+		controllerutil.AddFinalizer(mgoShard, FinalizerMgoShard)
+		if err := r.Update(ctx, mgoShard); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	replicaSetId := mgoShard.GetName()
 
-	if mgoShard.GetDeletionTimestamp() != nil {
-		// todo clear up
-
+	if mgoShard.GetDeletionTimestamp() != nil && !mgoShard.GetDeletionTimestamp().IsZero() {
+		controllerutil.RemoveFinalizer(mgoShard, FinalizerMgoShard)
+		if err := r.Update(ctx, mgoShard); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
 	defer func() {
 		if err := r.Get(ctx, req.NamespacedName, mgoShard); err != nil {
 			log.Error(err, "Unable to get the mgoShard resource")
+			if retErr == nil {
+				retErr = err
+			}
 			return
 		}
 
@@ -110,6 +127,9 @@ func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 		if e := r.Status().Update(ctx, mgoShard); e != nil {
 			log.Error(e, "Unable to update the status of the mgoCluster resource")
+			if retErr == nil {
+				retErr = e
+			}
 			return
 		}
 	}()
@@ -128,12 +148,12 @@ func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs := FmtShardMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(),
 		replicaSetId, mgoShard.Spec.Port, mgoShard.Spec.NumSecondaryNodes, mgoShard.Spec.NumArbiterNodes)
 
-	if initialized, err := mongoclient.CheckMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs, log); err != nil {
+	if initialized, err := mongoclient.CheckReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs); err != nil {
 		retErr = fmt.Errorf("an error occurred while checking the replica set of shard in the mongodb cluster, %v", err)
 		retCtrl.RequeueAfter = time.Second
 		return
 	} else if !initialized {
-		if err := mongoclient.InitiateMgoReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs, log); err != nil {
+		if err := mongoclient.InitiateReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs); err != nil {
 			retErr = fmt.Errorf("an error occurred while initializing the replica set of shard in the mongodb cluster, %v", err)
 			retCtrl.RequeueAfter = time.Second
 			return
@@ -147,7 +167,7 @@ func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), mgoCluster.Spec.Routers.ServicePort)
 	shardDBAddrs := append([]string{primaryMgoAddr}, secondaryMgoAddrs...)
 	shardDBAddrs = append(shardDBAddrs, arbiterMgoAddrs...)
-	if exist, err := mongoclient.CheckMgoShard(routerMgoAddr, replicaSetId, shardDBAddrs, log); err != nil {
+	if exist, err := mongoclient.CheckShard(mgoCluster.Spec.DBConnTimeout, routerMgoAddr, replicaSetId, shardDBAddrs); err != nil {
 		retErr = fmt.Errorf("an error occurred while checking the shard %v in the mongodb cluster, %v", replicaSetId, err)
 		retCtrl.RequeueAfter = time.Second
 		return
@@ -156,7 +176,7 @@ func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return
 	}
 
-	if err := mongoclient.AddMgoShard(routerMgoAddr, replicaSetId, shardDBAddrs, log); err != nil {
+	if err := mongoclient.AddShard(mgoCluster.Spec.DBConnTimeout, routerMgoAddr, replicaSetId, shardDBAddrs); err != nil {
 		retErr = fmt.Errorf("an error occurred while adding the shard %v to the mongodb cluster, %v", replicaSetId, err)
 		retCtrl.RequeueAfter = time.Second
 		return

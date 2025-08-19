@@ -62,14 +62,17 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	if len(mgoCluster.Status.Conditions) == 0 {
-		meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available", Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
-		return ctrl.Result{}, r.Status().Update(ctx, mgoCluster)
-	}
+	// if len(mgoCluster.Status.Conditions) == 0 {
+	// 	meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available", Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
+	// 	return ctrl.Result{}, r.Status().Update(ctx, mgoCluster)
+	// }
 
 	defer func() {
 		if err := r.Get(ctx, req.NamespacedName, mgoCluster); err != nil {
 			log.Error(err, "Unable to get the mgoCluster resource")
+			if retErr == nil {
+				retErr = err
+			}
 			return
 		}
 
@@ -86,6 +89,9 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 		if e := r.Status().Update(ctx, mgoCluster); e != nil {
 			log.Error(e, "Unable to update the status of the mgoCluster resource")
+			if retErr == nil {
+				retErr = e
+			}
 			return
 		}
 	}()
