@@ -1,5 +1,6 @@
 ## Append samples of your project ##
 resources:
 - mongodb_v1_mongodbcluster.yaml
-- mongodb_v1_mongodbshard.yaml
+- shard_shrs1.yaml
+- shard_shrs2.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
