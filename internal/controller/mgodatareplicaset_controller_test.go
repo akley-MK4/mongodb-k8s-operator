@@ -30,7 +30,7 @@ import (
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
 )
 
-var _ = Describe("MongoDBShard Controller", func() {
+var _ = Describe("MgoDataReplicaSet Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
 
@@ -40,13 +40,13 @@ var _ = Describe("MongoDBShard Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		mongodbshard := &mongodbv1.MongoDBShard{}
+		mgodatareplicaset := &mongodbv1.MgoDataReplicaSet{}
 
 		BeforeEach(func() {
-			By("creating the custom resource for the Kind MongoDBShard")
-			err := k8sClient.Get(ctx, typeNamespacedName, mongodbshard)
+			By("creating the custom resource for the Kind MgoDataReplicaSet")
+			err := k8sClient.Get(ctx, typeNamespacedName, mgodatareplicaset)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &mongodbv1.MongoDBShard{
+				resource := &mongodbv1.MgoDataReplicaSet{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
@@ -59,16 +59,16 @@ var _ = Describe("MongoDBShard Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &mongodbv1.MongoDBShard{}
+			resource := &mongodbv1.MgoDataReplicaSet{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Cleanup the specific resource instance MongoDBShard")
+			By("Cleanup the specific resource instance MgoDataReplicaSet")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &MongoDBShardReconciler{
+			controllerReconciler := &MgoDataReplicaSetReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}

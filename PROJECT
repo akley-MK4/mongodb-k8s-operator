@@ -27,4 +27,13 @@ resources:
   kind: MongoDBShard
   path: github.com/akley-MK4/mongodb-k8s-operator/api/v1
   version: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: akleymk4.com
+  group: mongodb
+  kind: MgoDataReplicaSet
+  path: github.com/akley-MK4/mongodb-k8s-operator/api/v1
+  version: v1
 version: "3"

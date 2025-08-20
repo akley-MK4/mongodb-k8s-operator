@@ -209,11 +209,11 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "MongoDBCluster")
 		os.Exit(1)
 	}
-	if err := (&controller.MongoDBShardReconciler{
+	if err := (&controller.MgoDataReplicaSetReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "MongoDBShard")
+		setupLog.Error(err, "unable to create controller", "controller", "MgoDataReplicaSet")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

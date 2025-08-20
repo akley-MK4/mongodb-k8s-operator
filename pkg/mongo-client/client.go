@@ -27,3 +27,20 @@ func LockMgoDatabase() error {
 
 	return nil
 }
+
+func FindListWithTimeout(timeout time.Duration, client *mongo.Client, dbName, collectionName string, filter, results any, opts ...options.Lister[options.FindOptions]) error {
+	ctx, cancelFunc := context.WithTimeoutCause(context.TODO(), timeout, errors.New("ctx timeout"))
+	defer cancelFunc()
+
+	cursor, errCursor := client.Database(dbName).Collection(collectionName).Find(ctx, filter, opts...)
+	if errCursor != nil {
+		return errCursor
+	}
+	defer func() {
+		if err := cursor.Close(context.TODO()); err != nil {
+			logger.WarningF("Failed to close the cursor of the collection, dbName: %s, collectionName: %s, err: %v", dbName, collectionName, err)
+		}
+	}()
+
+	return cursor.All(ctx, results)
+}

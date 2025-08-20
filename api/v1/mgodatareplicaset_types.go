@@ -23,8 +23,8 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// MongoDBShardSpec defines the desired state of MongoDBShard
-type MongoDBShardSpec struct {
+// MgoDataReplicaSetSpec defines the desired state of MgoDataReplicaSet
+type MgoDataReplicaSetSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 	// The following markers will use OpenAPI v3 schema to validate the value
@@ -36,10 +36,12 @@ type MongoDBShardSpec struct {
 	DataPath string `json:"dataPath,omitempty"`
 	// +kubebuilder:default:=27018
 	Port uint16 `json:"port,omitempty"`
+	// +kubebuilder:default:=false
+	EnableShard bool `json:"enableShard,omitempty"`
 }
 
-// MongoDBShardStatus defines the observed state of MongoDBShard.
-type MongoDBShardStatus struct {
+// MgoDataReplicaSetStatus defines the observed state of MgoDataReplicaSet.
+type MgoDataReplicaSetStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
@@ -49,32 +51,32 @@ type MongoDBShardStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 
-// MongoDBShard is the Schema for the mongodbshards API
-type MongoDBShard struct {
+// MgoDataReplicaSet is the Schema for the mgodatareplicasets API
+type MgoDataReplicaSet struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitempty,omitzero"`
 
-	// spec defines the desired state of MongoDBShard
+	// spec defines the desired state of MgoDataReplicaSet
 	// +required
-	Spec MongoDBShardSpec `json:"spec"`
+	Spec MgoDataReplicaSetSpec `json:"spec"`
 
-	// status defines the observed state of MongoDBShard
+	// status defines the observed state of MgoDataReplicaSet
 	// +optional
-	Status MongoDBShardStatus `json:"status,omitempty,omitzero"`
+	Status MgoDataReplicaSetStatus `json:"status,omitempty,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// MongoDBShardList contains a list of MongoDBShard
-type MongoDBShardList struct {
+// MgoDataReplicaSetList contains a list of MgoDataReplicaSet
+type MgoDataReplicaSetList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []MongoDBShard `json:"items"`
+	Items           []MgoDataReplicaSet `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&MongoDBShard{}, &MongoDBShardList{})
+	SchemeBuilder.Register(&MgoDataReplicaSet{}, &MgoDataReplicaSetList{})
 }

@@ -29,6 +29,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
@@ -40,33 +41,32 @@ import (
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
 	mongoclient "github.com/akley-MK4/mongodb-k8s-operator/pkg/mongo-client"
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
-	FinalizerMgoShard = "finalizer-shard"
+	FinalizerMgoReplicaSet = "finalizer-mgo-replicaset"
 )
 
-// MongoDBShardReconciler reconciles a MongoDBShard object
-type MongoDBShardReconciler struct {
+// MgoDataReplicaSetReconciler reconciles a MgoDataReplicaSet object
+type MgoDataReplicaSetReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mongodbshards,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mongodbshards/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mongodbshards/finalizers,verbs=update
+// +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mgodatareplicasets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mgodatareplicasets/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mgodatareplicasets/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 // TODO(user): Modify the Reconcile function to compare the state specified by
-// the MongoDBShard object against the actual cluster state, and then
+// the MgoDataReplicaSet object against the actual cluster state, and then
 // perform operations to make the cluster state reflect the state specified by
 // the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
-func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (retCtrl ctrl.Result, retErr error) {
+func (r *MgoDataReplicaSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (retCtrl ctrl.Result, retErr error) {
 	log := logf.FromContext(ctx)
 
 	var mgoClusterList mongodbv1.MongoDBClusterList
@@ -79,35 +79,41 @@ func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	mgoCluster := &mgoClusterList.Items[0]
 
-	mgoShard := &mongodbv1.MongoDBShard{}
-	if err := r.Get(ctx, req.NamespacedName, mgoShard); err != nil {
+	mgoDataReplicaSet := &mongodbv1.MgoDataReplicaSet{}
+	if err := r.Get(ctx, req.NamespacedName, mgoDataReplicaSet); err != nil {
 		if apierrors.IsNotFound(err) {
-			log.Info("The resource MongoDBCluster not found. Ignoring since object must be deleted")
+			log.Info("The resource MongoDataRS not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
 
-	if !controllerutil.ContainsFinalizer(mgoShard, FinalizerMgoShard) {
-		controllerutil.AddFinalizer(mgoShard, FinalizerMgoShard)
-		if err := r.Update(ctx, mgoShard); err != nil {
+	if !controllerutil.ContainsFinalizer(mgoDataReplicaSet, FinalizerMgoReplicaSet) {
+		controllerutil.AddFinalizer(mgoDataReplicaSet, FinalizerMgoReplicaSet)
+		if err := r.Update(ctx, mgoDataReplicaSet); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	replicaSetId := mgoShard.GetName()
+	replicaSetId := mgoDataReplicaSet.GetName()
 
-	if mgoShard.GetDeletionTimestamp() != nil && !mgoShard.GetDeletionTimestamp().IsZero() {
-		controllerutil.RemoveFinalizer(mgoShard, FinalizerMgoShard)
-		if err := r.Update(ctx, mgoShard); err != nil {
+	if mgoDataReplicaSet.GetDeletionTimestamp() != nil && !mgoDataReplicaSet.GetDeletionTimestamp().IsZero() {
+		routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), mgoCluster.Spec.Routers.ServicePort)
+		if err := mongoclient.SafeRemoveShard(mgoCluster.Spec.DBConnTimeout, routerMgoAddr, replicaSetId); err != nil {
+			log.Error(err, "Failed to stop remove the shard", "replicaSetId", replicaSetId)
+			return ctrl.Result{RequeueAfter: time.Second}, err
+		}
+
+		controllerutil.RemoveFinalizer(mgoDataReplicaSet, FinalizerMgoReplicaSet)
+		if err := r.Update(ctx, mgoDataReplicaSet); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
 
 	defer func() {
-		if err := r.Get(ctx, req.NamespacedName, mgoShard); err != nil {
-			log.Error(err, "Unable to get the mgoShard resource")
+		if err := r.Get(ctx, req.NamespacedName, mgoDataReplicaSet); err != nil {
+			log.Error(err, "Unable to get the replica set resource")
 			if retErr == nil {
 				retErr = err
 			}
@@ -115,17 +121,17 @@ func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 
 		if retErr != nil {
-			meta.SetStatusCondition(&mgoShard.Status.Conditions, metav1.Condition{Type: "Available",
+			meta.SetStatusCondition(&mgoDataReplicaSet.Status.Conditions, metav1.Condition{Type: "Available",
 				Status: metav1.ConditionFalse, Reason: "Reconciling",
 				Message: retErr.Error(),
 			})
 		} else if retCtrl.RequeueAfter <= 0 {
-			meta.SetStatusCondition(&mgoShard.Status.Conditions, metav1.Condition{Type: "Available",
+			meta.SetStatusCondition(&mgoDataReplicaSet.Status.Conditions, metav1.Condition{Type: "Available",
 				Status: metav1.ConditionTrue, Reason: "Reconciling",
 				Message: "All components have been successfully deployed"})
 		}
 
-		if e := r.Status().Update(ctx, mgoShard); e != nil {
+		if e := r.Status().Update(ctx, mgoDataReplicaSet); e != nil {
 			log.Error(e, "Unable to update the status of the mgoCluster resource")
 			if retErr == nil {
 				retErr = e
@@ -134,19 +140,19 @@ func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}()
 
-	if retCtrl, retErr = r.reconcileShardHeadlessService(ctx, log, mgoCluster, mgoShard); retErr != nil {
+	if retCtrl, retErr = r.reconcileService(ctx, log, mgoCluster, mgoDataReplicaSet); retErr != nil {
 		retErr = fmt.Errorf("resource: Service, replicaSetId: %v, error: %v", replicaSetId, retErr)
 		return
 	}
 
-	if retCtrl, retErr = r.reconcileShardStatefulSet(ctx, log, mgoCluster, mgoShard); retErr != nil || retCtrl.RequeueAfter > 0 {
+	if retCtrl, retErr = r.reconcileShardStatefulSet(ctx, log, mgoCluster, mgoDataReplicaSet); retErr != nil || retCtrl.RequeueAfter > 0 {
 		retErr = fmt.Errorf("resource: StatefulSet, replicaSetId: %v, error: %v", replicaSetId, retErr)
 		return
 	}
 
 	// The pods of the replica set are reconciled, check or initialize the replica set
 	primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs := FmtShardMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(),
-		replicaSetId, mgoShard.Spec.Port, mgoShard.Spec.NumSecondaryNodes, mgoShard.Spec.NumArbiterNodes)
+		replicaSetId, mgoDataReplicaSet.Spec.Port, mgoDataReplicaSet.Spec.NumSecondaryNodes, mgoDataReplicaSet.Spec.NumArbiterNodes)
 
 	if initialized, err := mongoclient.CheckReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs); err != nil {
 		retErr = fmt.Errorf("an error occurred while checking the replica set of shard in the mongodb cluster, %v", err)
@@ -167,7 +173,7 @@ func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), mgoCluster.Spec.Routers.ServicePort)
 	shardDBAddrs := append([]string{primaryMgoAddr}, secondaryMgoAddrs...)
 	shardDBAddrs = append(shardDBAddrs, arbiterMgoAddrs...)
-	if exist, err := mongoclient.CheckShard(mgoCluster.Spec.DBConnTimeout, routerMgoAddr, replicaSetId, shardDBAddrs); err != nil {
+	if exist, err := mongoclient.CheckShardAdded(mgoCluster.Spec.DBConnTimeout, routerMgoAddr, replicaSetId, shardDBAddrs); err != nil {
 		retErr = fmt.Errorf("an error occurred while checking the shard %v in the mongodb cluster, %v", replicaSetId, err)
 		retCtrl.RequeueAfter = time.Second
 		return
@@ -187,20 +193,20 @@ func (r *MongoDBShardReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *MongoDBShardReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *MgoDataReplicaSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&mongodbv1.MongoDBShard{}).
-		Named("mongodbshard").
+		For(&mongodbv1.MgoDataReplicaSet{}).
+		Named("mgodatareplicaset").
 		Complete(r)
 }
 
-func (r *MongoDBShardReconciler) reconcileShardHeadlessService(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster, mgoShard *mongodbv1.MongoDBShard) (ctrl.Result, error) {
+func (r *MgoDataReplicaSetReconciler) reconcileService(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) (ctrl.Result, error) {
 
 	var svc corev1.Service
-	replicaSetId := mgoShard.GetName()
+	replicaSetId := mgoDataReplicaSet.GetName()
 	name := FmtShardServiceName(mgoCluster.GetName(), replicaSetId)
 	key := client.ObjectKey{
-		Namespace: mgoShard.GetNamespace(),
+		Namespace: mgoDataReplicaSet.GetNamespace(),
 		Name:      name,
 	}
 
@@ -210,7 +216,7 @@ func (r *MongoDBShardReconciler) reconcileShardHeadlessService(ctx context.Conte
 		}
 
 		svc.ObjectMeta.Name = name
-		svc.ObjectMeta.Namespace = mgoShard.GetNamespace()
+		svc.ObjectMeta.Namespace = mgoDataReplicaSet.GetNamespace()
 		svc.Spec.Type = corev1.ServiceTypeClusterIP
 		svc.Spec.ClusterIP = "None"
 		svc.Spec.Selector = map[string]string{
@@ -219,11 +225,11 @@ func (r *MongoDBShardReconciler) reconcileShardHeadlessService(ctx context.Conte
 		}
 		svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{
 			Name:       "data",
-			Port:       int32(mgoShard.Spec.Port),
-			TargetPort: intstr.FromInt(int(mgoShard.Spec.Port)),
+			Port:       int32(mgoDataReplicaSet.Spec.Port),
+			TargetPort: intstr.FromInt(int(mgoDataReplicaSet.Spec.Port)),
 		})
 
-		if e := ctrl.SetControllerReference(mgoShard, &svc, r.Scheme); e != nil {
+		if e := ctrl.SetControllerReference(mgoDataReplicaSet, &svc, r.Scheme); e != nil {
 			return ctrl.Result{}, fmt.Errorf("unable to set the controller reference, %v", e)
 		}
 
@@ -240,13 +246,13 @@ func (r *MongoDBShardReconciler) reconcileShardHeadlessService(ctx context.Conte
 	return ctrl.Result{}, nil
 }
 
-func (r *MongoDBShardReconciler) reconcileShardStatefulSet(ctx context.Context, log logr.Logger,
-	mgoCluster *mongodbv1.MongoDBCluster, mgoShard *mongodbv1.MongoDBShard) (ctrl.Result, error) {
+func (r *MgoDataReplicaSetReconciler) reconcileShardStatefulSet(ctx context.Context, log logr.Logger,
+	mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) (ctrl.Result, error) {
 
-	replicaSetId := mgoShard.GetName()
+	replicaSetId := mgoDataReplicaSet.GetName()
 	var foundStatefulSet appsv1.StatefulSet
 	key := client.ObjectKey{
-		Namespace: mgoShard.GetNamespace(),
+		Namespace: mgoDataReplicaSet.GetNamespace(),
 		Name:      FmtShardStatefulSetName(mgoCluster.GetName(), replicaSetId),
 	}
 
@@ -255,7 +261,7 @@ func (r *MongoDBShardReconciler) reconcileShardStatefulSet(ctx context.Context, 
 			return ctrl.Result{}, fmt.Errorf("unnable to get the stateful set, %v", err)
 		}
 
-		if e := r.createShardStatefulSet(ctx, mgoCluster, mgoShard); e != nil {
+		if e := r.createShardStatefulSet(ctx, mgoCluster, mgoDataReplicaSet); e != nil {
 			return ctrl.Result{}, e
 		}
 		log.Info("Successfully created a stateful set for shard", "replicaSetId", replicaSetId)
@@ -264,7 +270,7 @@ func (r *MongoDBShardReconciler) reconcileShardStatefulSet(ctx context.Context, 
 		log.Info("The stateful set of shard exists", "replicaSetId", replicaSetId)
 	}
 
-	numReplicaSetNodes := CountNumShardReplicaSetNodes(mgoShard.Spec.NumSecondaryNodes, mgoShard.Spec.NumArbiterNodes)
+	numReplicaSetNodes := CountNumShardReplicaSetNodes(mgoDataReplicaSet.Spec.NumSecondaryNodes, mgoDataReplicaSet.Spec.NumArbiterNodes)
 	if foundStatefulSet.Spec.Replicas == nil || (*foundStatefulSet.Spec.Replicas) != numReplicaSetNodes {
 		foundStatefulSet.Spec.Replicas = ptr.To(numReplicaSetNodes)
 		if err := r.Update(ctx, &foundStatefulSet); err != nil {
@@ -276,14 +282,14 @@ func (r *MongoDBShardReconciler) reconcileShardStatefulSet(ctx context.Context, 
 	return ctrl.Result{}, nil
 }
 
-func (r *MongoDBShardReconciler) createShardStatefulSet(ctx context.Context, mgoCluster *mongodbv1.MongoDBCluster, mgoShard *mongodbv1.MongoDBShard) (retErr error) {
-	statefulSet, errStatefulSet := r.newShardStatefulSet(mgoCluster, mgoShard)
+func (r *MgoDataReplicaSetReconciler) createShardStatefulSet(ctx context.Context, mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) (retErr error) {
+	statefulSet, errStatefulSet := r.newShardStatefulSet(mgoCluster, mgoDataReplicaSet)
 	if errStatefulSet != nil {
 		retErr = fmt.Errorf("unable to create a data object with type StatefulSet, %v", errStatefulSet)
 		return
 	}
 
-	if e := ctrl.SetControllerReference(mgoCluster, statefulSet, r.Scheme); e != nil {
+	if e := ctrl.SetControllerReference(mgoDataReplicaSet, statefulSet, r.Scheme); e != nil {
 		retErr = fmt.Errorf("unable to set the controller reference, %v", e)
 		return
 	}
@@ -303,8 +309,8 @@ func fmtComponentTypeObjectName(mgoClusterName string, componentType mongodbv1.C
 	return strings.Join([]string{mgoClusterName, string(componentType)}, "-")
 }
 
-func (r *MongoDBShardReconciler) newShardStatefulSet(mgoCluster *mongodbv1.MongoDBCluster, mgoShard *mongodbv1.MongoDBShard) (*appsv1.StatefulSet, error) {
-	replicaSetId := mgoShard.GetName()
+func (r *MgoDataReplicaSetReconciler) newShardStatefulSet(mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) (*appsv1.StatefulSet, error) {
+	replicaSetId := mgoDataReplicaSet.GetName()
 	objectName := FmtShardStatefulSetName(mgoCluster.GetName(), replicaSetId)
 
 	statefulSet := &appsv1.StatefulSet{
@@ -314,7 +320,7 @@ func (r *MongoDBShardReconciler) newShardStatefulSet(mgoCluster *mongodbv1.Mongo
 		},
 
 		Spec: appsv1.StatefulSetSpec{
-			Replicas: ptr.To(CountNumShardReplicaSetNodes(mgoShard.Spec.NumSecondaryNodes, mgoShard.Spec.NumArbiterNodes)),
+			Replicas: ptr.To(CountNumShardReplicaSetNodes(mgoDataReplicaSet.Spec.NumSecondaryNodes, mgoDataReplicaSet.Spec.NumArbiterNodes)),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"component-type": string(mongodbv1.ComponentTypeShard)},
 			},
@@ -342,7 +348,7 @@ func (r *MongoDBShardReconciler) newShardStatefulSet(mgoCluster *mongodbv1.Mongo
 		Image:           imageMongodb,
 		ImagePullPolicy: mgoCluster.Spec.ImagePullPolicy,
 		Ports: []corev1.ContainerPort{{
-			ContainerPort: int32(mgoShard.Spec.Port),
+			ContainerPort: int32(mgoDataReplicaSet.Spec.Port),
 			Name:          "data",
 		}},
 		Command: []string{"mongod"},
@@ -351,9 +357,9 @@ func (r *MongoDBShardReconciler) newShardStatefulSet(mgoCluster *mongodbv1.Mongo
 			"--replSet",
 			replicaSetId,
 			"--dbpath",
-			mgoShard.Spec.DataPath,
+			mgoDataReplicaSet.Spec.DataPath,
 			"--port",
-			strconv.Itoa(int(mgoShard.Spec.Port)),
+			strconv.Itoa(int(mgoDataReplicaSet.Spec.Port)),
 			"--bind_ip_all",
 		},
 	}

@@ -4,20 +4,20 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: mongodbshards.mongodb.akleymk4.com
+  name: mgodatareplicasets.mongodb.akleymk4.com
 spec:
   group: mongodb.akleymk4.com
   names:
-    kind: MongoDBShard
-    listKind: MongoDBShardList
-    plural: mongodbshards
-    singular: mongodbshard
+    kind: MgoDataReplicaSet
+    listKind: MgoDataReplicaSetList
+    plural: mgodatareplicasets
+    singular: mgodatareplicaset
   scope: Namespaced
   versions:
   - name: v1
     schema:
       openAPIV3Schema:
-        description: MongoDBShard is the Schema for the mongodbshards API
+        description: MgoDataReplicaSet is the Schema for the mgodatareplicasets API
         properties:
           apiVersion:
             description: |-
@@ -37,11 +37,14 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of MongoDBShard
+            description: spec defines the desired state of MgoDataReplicaSet
             properties:
               dataPath:
                 default: /data/db
                 type: string
+              enableShard:
+                default: false
+                type: boolean
               numArbiterNodes:
                 type: integer
               numSecondaryNodes:
@@ -51,7 +54,7 @@ spec:
                 type: integer
             type: object
           status:
-            description: status defines the observed state of MongoDBShard
+            description: status defines the observed state of MgoDataReplicaSet
             properties:
               conditions:
                 items:

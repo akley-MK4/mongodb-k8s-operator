@@ -11,17 +11,17 @@ metadata:
   labels:
     app.kubernetes.io/name: mongodb-k8s-operator
     app.kubernetes.io/managed-by: kustomize
-  name: mongodbshard-admin-role
+  name: mgodatareplicaset-admin-role
 rules:
 - apiGroups:
   - mongodb.akleymk4.com
   resources:
-  - mongodbshards
+  - mgodatareplicasets
   verbs:
   - '*'
 - apiGroups:
   - mongodb.akleymk4.com
   resources:
-  - mongodbshards/status
+  - mgodatareplicasets/status
   verbs:
   - get
