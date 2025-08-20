@@ -14,7 +14,14 @@ spec:
     singular: mgodatareplicaset
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .status.initialized
+      name: Initialized
+      type: boolean
+    - jsonPath: .status.addedShard
+      name: AddedShard
+      type: boolean
+    name: v1
     schema:
       openAPIV3Schema:
         description: MgoDataReplicaSet is the Schema for the mgodatareplicasets API
@@ -56,6 +63,8 @@ spec:
           status:
             description: status defines the observed state of MgoDataReplicaSet
             properties:
+              addedShard:
+                type: boolean
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -112,6 +121,8 @@ spec:
                   - type
                   type: object
                 type: array
+              initialized:
+                type: boolean
             type: object
         required:
         - spec

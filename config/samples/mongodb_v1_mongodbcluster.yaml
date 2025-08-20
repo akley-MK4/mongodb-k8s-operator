@@ -10,7 +10,7 @@ spec:
     mongodb: mongodb/mongodb-community-server:7.0.11-ubuntu2204
   imagePullPolicy: IfNotPresent
   resourceRequirements:
-    shard:
+    dataReplicaSet:
       requests:
         cpu: 50m
         memory: 128Mi

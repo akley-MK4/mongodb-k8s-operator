@@ -116,6 +116,10 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
+	if foundStatefulSet.Status.ReadyReplicas != confSrvSpec.NumReplicas || foundStatefulSet.Status.UpdatedReplicas != confSrvSpec.NumReplicas {
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+
 	// The pods of the replica set are reconciled, check or initialize the replica set
 	mgoAddrs := FmtConfigServerMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(), confSrvSpec.ReplicaSetId, confSrvSpec.NumReplicas, confSrvSpec.Port)
 

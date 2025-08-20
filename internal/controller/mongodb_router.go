@@ -120,6 +120,10 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
+	if foundDeployment.Status.ReadyReplicas != routersSpec.NumReplicas || foundDeployment.Status.UpdatedReplicas != routersSpec.NumReplicas {
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+
 	return ctrl.Result{}, nil
 }
 

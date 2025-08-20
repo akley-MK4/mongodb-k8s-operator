@@ -46,10 +46,15 @@ type MgoDataReplicaSetStatus struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	Initialized bool `json:"initialized,omitempty"`
+	AddedShard  bool `json:"addedShard,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Initialized",type=boolean,JSONPath=`.status.initialized`
+// +kubebuilder:printcolumn:name="AddedShard",type=boolean,JSONPath=`.status.addedShard`
 
 // MgoDataReplicaSet is the Schema for the mgodatareplicasets API
 type MgoDataReplicaSet struct {
