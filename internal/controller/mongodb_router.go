@@ -113,14 +113,19 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 	}
 
 	if foundDeployment.Spec.Replicas == nil || (*foundDeployment.Spec.Replicas) != routersSpec.NumReplicas {
-		foundDeployment.Spec.Replicas = ptr.To(routersSpec.NumReplicas)
-		if err := r.Update(ctx, &foundDeployment); err != nil {
+		cpFoundDeployment := foundDeployment.DeepCopy()
+		cpFoundDeployment.Spec.Replicas = ptr.To(routersSpec.NumReplicas)
+		if err := r.Update(ctx, cpFoundDeployment); err != nil {
 			return ctrl.Result{}, fmt.Errorf("unable to update the deployment found, %v", err)
 		}
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	if foundDeployment.Status.ReadyReplicas != routersSpec.NumReplicas || foundDeployment.Status.UpdatedReplicas != routersSpec.NumReplicas {
+		log.Info("Waiting for all pods of the router to be ready",
+			"replicas", routersSpec.NumReplicas,
+			"readyReplicas", foundDeployment.Status.ReadyReplicas,
+			"updatedReplicas", foundDeployment.Status.UpdatedReplicas)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 

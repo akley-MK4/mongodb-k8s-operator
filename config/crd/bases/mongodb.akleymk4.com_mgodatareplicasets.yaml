@@ -50,7 +50,6 @@ spec:
                 default: /data/db
                 type: string
               enableShard:
-                default: false
                 type: boolean
               numArbiterNodes:
                 type: integer

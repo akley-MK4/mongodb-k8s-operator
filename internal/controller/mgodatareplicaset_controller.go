@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -69,42 +70,43 @@ type MgoDataReplicaSetReconciler struct {
 func (r *MgoDataReplicaSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (retCtrl ctrl.Result, retErr error) {
 	log := logf.FromContext(ctx)
 
-	var mgoClusterList mongodbv1.MongoDBClusterList
-	if err := r.List(ctx, &mgoClusterList, client.InNamespace(req.Namespace)); err != nil {
-		if apierrors.IsNotFound(err) && len(mgoClusterList.Items) <= 0 {
-			log.Info("The resource MongoDBCluster not found. Ignoring since object must be deleted")
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, err
+	mgoCluster, errMgoCluster := GetMongodbClusterRes(ctx, r, req.Namespace)
+	if errMgoCluster != nil {
+		return ctrl.Result{}, errMgoCluster
+	} else if mgoCluster == nil {
+		log.Info("The MongodbCluster resource dose not exists")
+		return ctrl.Result{}, nil
 	}
-	mgoCluster := &mgoClusterList.Items[0]
 
 	mgoDataReplicaSet := &mongodbv1.MgoDataReplicaSet{}
 	if err := r.Get(ctx, req.NamespacedName, mgoDataReplicaSet); err != nil {
 		if apierrors.IsNotFound(err) {
-			log.Info("The resource MongoDataRS not found. Ignoring since object must be deleted")
+			log.Info("The resource MgoDataReplicaSet not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
+	replicaSetId := mgoDataReplicaSet.GetName()
 
 	if !controllerutil.ContainsFinalizer(mgoDataReplicaSet, FinalizerMgoReplicaSet) {
-		controllerutil.AddFinalizer(mgoDataReplicaSet, FinalizerMgoReplicaSet)
-		if err := r.Update(ctx, mgoDataReplicaSet); err != nil {
-			return ctrl.Result{}, err
+		resObj := mgoDataReplicaSet.DeepCopy()
+		if controllerutil.AddFinalizer(resObj, FinalizerMgoReplicaSet) {
+			if err := r.Update(ctx, resObj); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
+		return ctrl.Result{}, nil
 	}
-
-	replicaSetId := mgoDataReplicaSet.GetName()
 
 	if mgoDataReplicaSet.GetDeletionTimestamp() != nil && !mgoDataReplicaSet.GetDeletionTimestamp().IsZero() {
 		if err := r.cleanupBeforeDelete(mgoCluster, mgoDataReplicaSet); err != nil {
-			log.Error(err, "Failed to clean up related resources", "replicaSetId", replicaSetId)
+			log.Error(err, "Failed to clean up related resources for the replica et", "replicaSetId", replicaSetId)
 			return ctrl.Result{RequeueAfter: time.Second}, err
 		}
 
-		controllerutil.RemoveFinalizer(mgoDataReplicaSet, FinalizerMgoReplicaSet)
-		if err := r.Update(ctx, mgoDataReplicaSet); err != nil {
+		resObj := mgoDataReplicaSet.DeepCopy()
+		controllerutil.RemoveFinalizer(resObj, FinalizerMgoReplicaSet)
+		if err := r.Update(ctx, resObj); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
@@ -114,43 +116,11 @@ func (r *MgoDataReplicaSetReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	initialized := false
 
 	defer func() {
-		if err := r.Get(ctx, req.NamespacedName, mgoDataReplicaSet); err != nil {
-			log.Error(err, "Unable to get the replica set resource")
+		if err := r.updateStatus(ctx, req.NamespacedName, retErr, initialized, addedShard); err != nil {
 			if retErr == nil {
 				retErr = err
 			}
-			return
 		}
-
-		if retErr != nil {
-			meta.SetStatusCondition(&mgoDataReplicaSet.Status.Conditions, metav1.Condition{Type: "Available",
-				Status: metav1.ConditionFalse, Reason: "Reconciling",
-				Message: retErr.Error(),
-			})
-			if e := r.Status().Update(ctx, mgoDataReplicaSet); e != nil {
-				log.Error(e, "Unable to update the status of the MgoDataReplicaSet resource")
-				return
-			}
-			return
-		}
-
-		if meta.SetStatusCondition(&mgoDataReplicaSet.Status.Conditions, metav1.Condition{Type: "Available",
-			Status: metav1.ConditionTrue, Reason: "Reconciling",
-			Message: "The replica set have been successfully deployed"}) ||
-			mgoDataReplicaSet.Status.AddedShard != addedShard ||
-			mgoDataReplicaSet.Status.Initialized != initialized {
-
-			mgoDataReplicaSet.Status.Initialized = initialized
-			mgoDataReplicaSet.Status.AddedShard = addedShard
-			if e := r.Status().Update(ctx, mgoDataReplicaSet); e != nil {
-				log.Error(e, "Unable to update the status of the MgoDataReplicaSet resource")
-				if retErr == nil {
-					retErr = e
-				}
-				return
-			}
-		}
-
 	}()
 
 	if retCtrl, retErr = r.reconcileService(ctx, log, mgoCluster, mgoDataReplicaSet); retErr != nil {
@@ -158,57 +128,23 @@ func (r *MgoDataReplicaSetReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return
 	}
 
-	if retCtrl, retErr = r.reconcileShardStatefulSet(ctx, log, mgoCluster, mgoDataReplicaSet); retErr != nil {
+	if retCtrl, retErr = r.reconcileStatefulSet(ctx, log, mgoCluster, mgoDataReplicaSet); retErr != nil {
 		retErr = fmt.Errorf("resource: StatefulSet, replicaSetId: %v, error: %v", replicaSetId, retErr)
 		return
 	} else if retCtrl.RequeueAfter > 0 {
 		return
 	}
 
-	// The pods of the replica set are reconciled, check or initialize the replica set
-	primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs := FmtShardMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(),
-		replicaSetId, mgoDataReplicaSet.Spec.Port, mgoDataReplicaSet.Spec.NumSecondaryNodes, mgoDataReplicaSet.Spec.NumArbiterNodes)
-
-	if initialized, err := mongoclient.CheckReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs); err != nil {
-		retErr = fmt.Errorf("an error occurred while checking the replica set of shard in the mongodb cluster, %v", err)
-		retCtrl.RequeueAfter = time.Second
-		return
-	} else if !initialized {
-		if err := mongoclient.InitiateReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs); err != nil {
-			retErr = fmt.Errorf("an error occurred while initializing the replica set of shard in the mongodb cluster, %v", err)
-			retCtrl.RequeueAfter = time.Second
-			return
-		}
-		log.Info("Successfully initialized the replica set of shard", "replicaSetId", replicaSetId)
-	} else {
-		log.Info("The replica set of shard has already been initialized in the mongodb cluster", "replicaSetId", replicaSetId)
-	}
-	initialized = true
-
-	// Check and add the shard to the mongodb cluster
+	// After downgrading the replica set, it is necessary to remove metadata from the cluster
 	if !mgoDataReplicaSet.Spec.EnableShard {
-		return ctrl.Result{}, nil
-	}
-	routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), mgoCluster.Spec.Routers.ServicePort)
-	shardDBAddrs := append([]string{primaryMgoAddr}, secondaryMgoAddrs...)
-	shardDBAddrs = append(shardDBAddrs, arbiterMgoAddrs...)
-	if exist, err := mongoclient.CheckShardAdded(mgoCluster.Spec.DBConnTimeout, routerMgoAddr, replicaSetId, shardDBAddrs); err != nil {
-		retErr = fmt.Errorf("an error occurred while checking the shard %v in the mongodb cluster, %v", replicaSetId, err)
-		retCtrl.RequeueAfter = time.Second
-		return
-	} else if exist {
-		addedShard = true
-		log.Info("The shard was added to the mongodb cluster", "replicaSetId", replicaSetId)
-		return
+
 	}
 
-	if err := mongoclient.AddShard(mgoCluster.Spec.DBConnTimeout, routerMgoAddr, replicaSetId, shardDBAddrs); err != nil {
-		retErr = fmt.Errorf("an error occurred while adding the shard %v to the mongodb cluster, %v", replicaSetId, err)
+	initialized, addedShard, retErr = r.checkAndSetMgoReplicaSetSetup(mgoCluster, mgoDataReplicaSet, log)
+	if retErr != nil {
 		retCtrl.RequeueAfter = time.Second
 		return
 	}
-	addedShard = true
-	log.Info("Successfully added the shard to the mongodb cluster", "replicaSetId", replicaSetId)
 
 	return ctrl.Result{}, nil
 }
@@ -221,11 +157,41 @@ func (r *MgoDataReplicaSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+func (r *MgoDataReplicaSetReconciler) updateStatus(ctx context.Context, ns types.NamespacedName, errResult error, initialized, addedShard bool) error {
+	mgoDataReplicaSet := &mongodbv1.MgoDataReplicaSet{}
+	if err := r.Get(ctx, ns, mgoDataReplicaSet); err != nil {
+		return err
+	}
+
+	if errResult != nil {
+		if meta.SetStatusCondition(&mgoDataReplicaSet.Status.Conditions, metav1.Condition{Type: "Available",
+			Status: metav1.ConditionFalse, Reason: "Reconciling",
+			Message: errResult.Error(),
+		}) {
+			return r.Status().Update(ctx, mgoDataReplicaSet)
+		}
+		return nil
+	}
+
+	if meta.SetStatusCondition(&mgoDataReplicaSet.Status.Conditions, metav1.Condition{Type: "Available",
+		Status: metav1.ConditionTrue, Reason: "Reconciling",
+		Message: "The replica set have been successfully deployed"}) ||
+		mgoDataReplicaSet.Status.AddedShard != addedShard ||
+		mgoDataReplicaSet.Status.Initialized != initialized {
+
+		mgoDataReplicaSet.Status.Initialized = initialized
+		mgoDataReplicaSet.Status.AddedShard = addedShard
+
+		return r.Status().Update(ctx, mgoDataReplicaSet)
+	}
+	return nil
+}
+
 func (r *MgoDataReplicaSetReconciler) reconcileService(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) (ctrl.Result, error) {
 
 	var svc corev1.Service
 	replicaSetId := mgoDataReplicaSet.GetName()
-	name := FmtShardServiceName(mgoCluster.GetName(), replicaSetId)
+	name := FmtDataReplicaSetServiceName(mgoCluster.GetName(), replicaSetId)
 	key := client.ObjectKey{
 		Namespace: mgoDataReplicaSet.GetNamespace(),
 		Name:      name,
@@ -241,7 +207,7 @@ func (r *MgoDataReplicaSetReconciler) reconcileService(ctx context.Context, log 
 		svc.Spec.Type = corev1.ServiceTypeClusterIP
 		svc.Spec.ClusterIP = "None"
 		svc.Spec.Selector = map[string]string{
-			"component-type": string(mongodbv1.ComponentTypeShard),
+			"component-type": string(mongodbv1.ComponentTypeDataReplicaSet),
 			"replicaset-id":  replicaSetId,
 		}
 		svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{
@@ -258,23 +224,23 @@ func (r *MgoDataReplicaSetReconciler) reconcileService(ctx context.Context, log 
 			return ctrl.Result{}, fmt.Errorf("unable to create a service, %v", e)
 		}
 
-		log.Info("Successfully created a service for shard", "replicaSetId", replicaSetId)
+		log.Info("Successfully created a service for the data replica set", "replicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
 	} else {
-		log.Info("The service of shard exists", "replicaSetId", replicaSetId)
+		log.Info("The service of the data replica set exists", "replicaSetId", replicaSetId)
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *MgoDataReplicaSetReconciler) reconcileShardStatefulSet(ctx context.Context, log logr.Logger,
+func (r *MgoDataReplicaSetReconciler) reconcileStatefulSet(ctx context.Context, log logr.Logger,
 	mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) (ctrl.Result, error) {
 
 	replicaSetId := mgoDataReplicaSet.GetName()
 	var foundStatefulSet appsv1.StatefulSet
 	key := client.ObjectKey{
 		Namespace: mgoDataReplicaSet.GetNamespace(),
-		Name:      FmtShardStatefulSetName(mgoCluster.GetName(), replicaSetId),
+		Name:      FmtDataReplicaSetStatefulSetName(mgoCluster.GetName(), replicaSetId),
 	}
 
 	if err := r.Get(ctx, key, &foundStatefulSet); err != nil {
@@ -282,26 +248,26 @@ func (r *MgoDataReplicaSetReconciler) reconcileShardStatefulSet(ctx context.Cont
 			return ctrl.Result{}, fmt.Errorf("unnable to get the stateful set, %v", err)
 		}
 
-		if e := r.createShardStatefulSet(ctx, mgoCluster, mgoDataReplicaSet); e != nil {
+		if e := r.createStatefulSet(ctx, mgoCluster, mgoDataReplicaSet); e != nil {
 			return ctrl.Result{}, e
 		}
-		log.Info("Successfully created a stateful set for shard", "replicaSetId", replicaSetId)
+		log.Info("Successfully created a stateful set for the data replica set", "replicaSetId", replicaSetId)
 		return ctrl.Result{}, nil
 	} else {
-		log.Info("The stateful set of shard exists", "replicaSetId", replicaSetId)
+		log.Info("The stateful set of the data replica set exists", "replicaSetId", replicaSetId)
 	}
 
-	numReplicaSetNodes := CountNumShardReplicaSetNodes(mgoDataReplicaSet.Spec.NumSecondaryNodes, mgoDataReplicaSet.Spec.NumArbiterNodes)
+	numReplicaSetNodes := CountNumDataReplicaSetNodes(mgoDataReplicaSet.Spec.NumSecondaryNodes, mgoDataReplicaSet.Spec.NumArbiterNodes)
 	if foundStatefulSet.Spec.Replicas == nil || (*foundStatefulSet.Spec.Replicas) != numReplicaSetNodes {
-		foundStatefulSet.Spec.Replicas = ptr.To(numReplicaSetNodes)
-		if err := r.Update(ctx, &foundStatefulSet); err != nil {
+		cpFoundStatefulSet := foundStatefulSet.DeepCopy()
+		cpFoundStatefulSet.Spec.Replicas = ptr.To(numReplicaSetNodes)
+		if err := r.Update(ctx, cpFoundStatefulSet); err != nil {
 			return ctrl.Result{}, fmt.Errorf("unable to update the stateful set found, %v", err)
 		}
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
-	podSpec := foundStatefulSet.Spec.Template.Spec
-	for idx, co := range podSpec.Containers {
+	for idx, co := range foundStatefulSet.Spec.Template.Spec.Containers {
 		if co.Name != "mongod" {
 			continue
 		}
@@ -314,8 +280,9 @@ func (r *MgoDataReplicaSetReconciler) reconcileShardStatefulSet(ctx context.Cont
 			}
 		}
 		if shardArgExists != mgoDataReplicaSet.Spec.EnableShard {
-			podSpec.Containers[idx].Args = buildDataReplicaSetContainerArgs(mgoDataReplicaSet)
-			if err := r.Update(ctx, &foundStatefulSet); err != nil {
+			cpFoundStatefulSet := foundStatefulSet.DeepCopy()
+			cpFoundStatefulSet.Spec.Template.Spec.Containers[idx].Args = buildDataReplicaSetContainerArgs(mgoDataReplicaSet)
+			if err := r.Update(ctx, cpFoundStatefulSet); err != nil {
 				return ctrl.Result{}, fmt.Errorf("unable to update the stateful set found, %v", err)
 			}
 			return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -324,14 +291,20 @@ func (r *MgoDataReplicaSetReconciler) reconcileShardStatefulSet(ctx context.Cont
 	}
 
 	if foundStatefulSet.Status.ReadyReplicas != numReplicaSetNodes || foundStatefulSet.Status.UpdatedReplicas != numReplicaSetNodes {
+		log.Info("Waiting for all pods of the data replica set to be ready",
+			"replicaSetId", replicaSetId,
+			"replicas", numReplicaSetNodes,
+			"readyReplicas", foundStatefulSet.Status.ReadyReplicas,
+			"updatedReplicas", foundStatefulSet.Status.UpdatedReplicas,
+		)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *MgoDataReplicaSetReconciler) createShardStatefulSet(ctx context.Context, mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) (retErr error) {
-	statefulSet, errStatefulSet := r.newShardStatefulSet(mgoCluster, mgoDataReplicaSet)
+func (r *MgoDataReplicaSetReconciler) createStatefulSet(ctx context.Context, mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) (retErr error) {
+	statefulSet, errStatefulSet := r.newStatefulSet(mgoCluster, mgoDataReplicaSet)
 	if errStatefulSet != nil {
 		retErr = fmt.Errorf("unable to create a data object with type StatefulSet, %v", errStatefulSet)
 		return
@@ -351,7 +324,7 @@ func (r *MgoDataReplicaSetReconciler) createShardStatefulSet(ctx context.Context
 }
 
 func (r *MgoDataReplicaSetReconciler) cleanupBeforeDelete(mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) error {
-	if !mgoDataReplicaSet.Spec.EnableShard {
+	if !mgoDataReplicaSet.Status.AddedShard {
 		return nil
 	}
 
@@ -363,6 +336,57 @@ func (r *MgoDataReplicaSetReconciler) cleanupBeforeDelete(mgoCluster *mongodbv1.
 	return nil
 }
 
+func (r *MgoDataReplicaSetReconciler) checkAndSetMgoReplicaSetSetup(mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet,
+	log logr.Logger) (retInitialized, retAddedShard bool, retErr error) {
+
+	replicaSetId := mgoDataReplicaSet.GetName()
+	// The pods of the replica set are reconciled, check or initialize the replica set
+	primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs := FmtDataReplicaSetMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(),
+		replicaSetId, mgoDataReplicaSet.Spec.Port, mgoDataReplicaSet.Spec.NumSecondaryNodes, mgoDataReplicaSet.Spec.NumArbiterNodes)
+
+	retInitialized, retErr = mongoclient.CheckReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs)
+	if retErr != nil {
+		retErr = fmt.Errorf("an error occurred while checking the data replica set in the mongodb cluster, %v", retErr)
+		return
+	}
+
+	if !retInitialized {
+		if err := mongoclient.InitiateReplicaSet(mgoCluster.Spec.DBConnTimeout, replicaSetId, primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs); err != nil {
+			retErr = fmt.Errorf("an error occurred while initializing the data replica set in the mongodb cluster, %v", err)
+			return
+		}
+		retInitialized = true
+		log.Info("Successfully initialized the data replica set", "replicaSetId", replicaSetId)
+	} else {
+		log.Info("The data replica set has already been initialized in the mongodb cluster", "replicaSetId", replicaSetId)
+	}
+
+	// Check and add the shard to the mongodb cluster
+	if !mgoDataReplicaSet.Spec.EnableShard {
+		return
+	}
+	routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), mgoCluster.Spec.Routers.ServicePort)
+	shardDBAddrs := append([]string{primaryMgoAddr}, secondaryMgoAddrs...)
+	shardDBAddrs = append(shardDBAddrs, arbiterMgoAddrs...)
+	retAddedShard, retErr = mongoclient.CheckShardAdded(mgoCluster.Spec.DBConnTimeout, routerMgoAddr, replicaSetId, shardDBAddrs)
+	if retErr != nil {
+		retErr = fmt.Errorf("an error occurred while checking the shard %v in the mongodb cluster, %v", replicaSetId, retErr)
+		return
+	}
+	if retAddedShard {
+		log.Info("The shard was added to the mongodb cluster", "replicaSetId", replicaSetId)
+		return
+	}
+
+	if err := mongoclient.AddShard(mgoCluster.Spec.DBConnTimeout, routerMgoAddr, replicaSetId, shardDBAddrs); err != nil {
+		retErr = fmt.Errorf("an error occurred while adding the shard %v to the mongodb cluster, %v", replicaSetId, err)
+		return
+	}
+	retAddedShard = true
+	log.Info("Successfully added the shard to the mongodb cluster", "replicaSetId", replicaSetId)
+	return
+}
+
 func fmtComponentTypeObjectName(mgoClusterName string, componentType mongodbv1.ComponentType, replicaSetId string) string {
 	if replicaSetId != "" {
 		return strings.Join([]string{mgoClusterName, string(componentType), replicaSetId}, "-")
@@ -370,9 +394,9 @@ func fmtComponentTypeObjectName(mgoClusterName string, componentType mongodbv1.C
 	return strings.Join([]string{mgoClusterName, string(componentType)}, "-")
 }
 
-func (r *MgoDataReplicaSetReconciler) newShardStatefulSet(mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) (*appsv1.StatefulSet, error) {
+func (r *MgoDataReplicaSetReconciler) newStatefulSet(mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) (*appsv1.StatefulSet, error) {
 	replicaSetId := mgoDataReplicaSet.GetName()
-	objectName := FmtShardStatefulSetName(mgoCluster.GetName(), replicaSetId)
+	objectName := FmtDataReplicaSetStatefulSetName(mgoCluster.GetName(), replicaSetId)
 
 	statefulSet := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -381,15 +405,15 @@ func (r *MgoDataReplicaSetReconciler) newShardStatefulSet(mgoCluster *mongodbv1.
 		},
 
 		Spec: appsv1.StatefulSetSpec{
-			Replicas: ptr.To(CountNumShardReplicaSetNodes(mgoDataReplicaSet.Spec.NumSecondaryNodes, mgoDataReplicaSet.Spec.NumArbiterNodes)),
+			Replicas: ptr.To(CountNumDataReplicaSetNodes(mgoDataReplicaSet.Spec.NumSecondaryNodes, mgoDataReplicaSet.Spec.NumArbiterNodes)),
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"component-type": string(mongodbv1.ComponentTypeShard)},
+				MatchLabels: map[string]string{"component-type": string(mongodbv1.ComponentTypeDataReplicaSet)},
 			},
-			ServiceName: FmtShardServiceName(mgoCluster.GetName(), replicaSetId),
+			ServiceName: FmtDataReplicaSetServiceName(mgoCluster.GetName(), replicaSetId),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"component-type": string(mongodbv1.ComponentTypeShard),
+						"component-type": string(mongodbv1.ComponentTypeDataReplicaSet),
 						"replicaset-id":  replicaSetId,
 					},
 				},
@@ -452,27 +476,27 @@ func buildDataReplicaSetContainerArgs(mgoDataReplicaSet *mongodbv1.MgoDataReplic
 	return args
 }
 
-func CountNumShardReplicaSetNodes(numSecondaryNodes, numArbiterNodes uint16) int32 {
+func CountNumDataReplicaSetNodes(numSecondaryNodes, numArbiterNodes uint16) int32 {
 	return int32(1 + numSecondaryNodes + numArbiterNodes)
 }
 
-func FmtShardStatefulSetName(clusterName, replicaSetId string) string {
-	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeShard, replicaSetId)
+func FmtDataReplicaSetStatefulSetName(clusterName, replicaSetId string) string {
+	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeDataReplicaSet, replicaSetId)
 }
 
-func FmtShardServiceName(clusterName, replicaSetId string) string {
-	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeShard, replicaSetId)
+func FmtDataReplicaSetServiceName(clusterName, replicaSetId string) string {
+	return fmtComponentTypeObjectName(clusterName, mongodbv1.ComponentTypeDataReplicaSet, replicaSetId)
 }
 
-func FmtShardMgoAddrs(clusterName, ns, replicaSetId string, port uint16, numSecondaryNodes, numArbiterNodes uint16) (
+func FmtDataReplicaSetMgoAddrs(clusterName, ns, replicaSetId string, port uint16, numSecondaryNodes, numArbiterNodes uint16) (
 	retPrimaryAddr string, retSecondaryAddrs, retArbiterAddrs []string) {
 
-	svcName := FmtShardServiceName(clusterName, replicaSetId)
-	statefulSetName := FmtShardStatefulSetName(clusterName, replicaSetId)
+	svcName := FmtDataReplicaSetServiceName(clusterName, replicaSetId)
+	statefulSetName := FmtDataReplicaSetStatefulSetName(clusterName, replicaSetId)
 
 	// Just for testing
 	k8sClusterDomain := "quick3"
-	numReplicaSetNodes := CountNumShardReplicaSetNodes(numSecondaryNodes, numArbiterNodes)
+	numReplicaSetNodes := CountNumDataReplicaSetNodes(numSecondaryNodes, numArbiterNodes)
 
 	var addrs []string
 	for i := int32(0); i < numReplicaSetNodes; i++ {

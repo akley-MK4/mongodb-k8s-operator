@@ -120,3 +120,20 @@ func (r *MongoDBClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("mongodbcluster").
 		Complete(r)
 }
+
+func GetMongodbClusterRes(ctx context.Context, reader client.Reader, ns string) (*mongodbv1.MongoDBCluster, error) {
+	var mgoClusterList mongodbv1.MongoDBClusterList
+	if err := reader.List(ctx, &mgoClusterList, client.InNamespace(ns)); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if len(mgoClusterList.Items) <= 0 {
+		return nil, nil
+	}
+
+	//return mgoClusterList.Items[0].DeepCopy(), nil
+	return &mgoClusterList.Items[0], nil
+}

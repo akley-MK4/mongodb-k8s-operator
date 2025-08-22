@@ -36,7 +36,7 @@ type MgoDataReplicaSetSpec struct {
 	DataPath string `json:"dataPath,omitempty"`
 	// +kubebuilder:default:=27018
 	Port uint16 `json:"port,omitempty"`
-	// +kubebuilder:default:=false
+
 	EnableShard bool `json:"enableShard,omitempty"`
 }
 

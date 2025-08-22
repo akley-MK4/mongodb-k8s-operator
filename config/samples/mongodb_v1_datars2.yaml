@@ -8,3 +8,4 @@ metadata:
 spec:
   numSecondaryNodes: 2
   numArbiterNodes: 0
+  enableShard: false

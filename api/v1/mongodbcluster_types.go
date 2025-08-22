@@ -44,9 +44,9 @@ type MongoDBClusterSpec struct {
 type ComponentType string
 
 const (
-	ComponentTypeShard        ComponentType = "shard"
-	ComponentTypeRouter       ComponentType = "router"
-	ComponentTypeConfigServer ComponentType = "configserver"
+	ComponentTypeDataReplicaSet ComponentType = "datars"
+	ComponentTypeRouter         ComponentType = "router"
+	ComponentTypeConfigServer   ComponentType = "configserver"
 )
 
 // +kubebuilder:object:generate=true
