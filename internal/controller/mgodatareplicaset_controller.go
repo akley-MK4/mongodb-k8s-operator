@@ -167,7 +167,8 @@ func (r *MgoDataReplicaSetReconciler) updateStatus(ctx context.Context, ns types
 		if meta.SetStatusCondition(&mgoDataReplicaSet.Status.Conditions, metav1.Condition{Type: "Available",
 			Status: metav1.ConditionFalse, Reason: "Reconciling",
 			Message: errResult.Error(),
-		}) {
+		}) || mgoDataReplicaSet.Status.Initialized != initialized {
+			mgoDataReplicaSet.Status.Initialized = initialized
 			return r.Status().Update(ctx, mgoDataReplicaSet)
 		}
 		return nil
