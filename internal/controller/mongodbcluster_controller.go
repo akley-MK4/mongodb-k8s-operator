@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,11 +62,6 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		return ctrl.Result{}, err
 	}
-
-	// if len(mgoCluster.Status.Conditions) == 0 {
-	// 	meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available", Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
-	// 	return ctrl.Result{}, r.Status().Update(ctx, mgoCluster)
-	// }
 
 	defer func() {
 		if err := r.Get(ctx, req.NamespacedName, mgoCluster); err != nil {
@@ -118,6 +114,7 @@ func (r *MongoDBClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mongodbv1.MongoDBCluster{}).
 		Named("mongodbcluster").
+		Owns(&appsv1.StatefulSet{}).
 		Complete(r)
 }
 
@@ -136,4 +133,49 @@ func GetMongodbClusterRes(ctx context.Context, reader client.Reader, ns string) 
 
 	//return mgoClusterList.Items[0].DeepCopy(), nil
 	return &mgoClusterList.Items[0], nil
+}
+
+func AddMongodbClusterShardToStatus(mgoCluster *mongodbv1.MongoDBCluster, replicaSetId string, statusClient client.StatusClient) (added bool, retErr error) {
+	for _, rsId := range mgoCluster.Status.Shards {
+		if replicaSetId == rsId {
+			return
+		}
+	}
+
+	patch := client.MergeFrom(mgoCluster.DeepCopy())
+	mgoCluster.Status.Shards = append(mgoCluster.Status.Shards, replicaSetId)
+	if retErr = statusClient.Status().Patch(context.TODO(), mgoCluster, patch); retErr != nil {
+		return
+	}
+
+	added = true
+	return
+}
+
+func RemoveMongodbClusterShardInStatus(mgoCluster *mongodbv1.MongoDBCluster, replicaSetId string, statusClient client.StatusClient) (removed bool, retErr error) {
+	rsIdExists := false
+	for _, rsId := range mgoCluster.Status.Shards {
+		if replicaSetId == rsId {
+			rsIdExists = true
+			break
+		}
+	}
+	if !rsIdExists {
+		return
+	}
+
+	patch := client.MergeFrom(mgoCluster.DeepCopy())
+	shards := mgoCluster.Status.Shards
+	mgoCluster.Status.Shards = []string{}
+	for _, rsId := range shards {
+		if rsId != replicaSetId {
+			mgoCluster.Status.Shards = append(mgoCluster.Status.Shards, rsId)
+		}
+	}
+	if retErr = statusClient.Status().Patch(context.TODO(), mgoCluster, patch); retErr != nil {
+		return
+	}
+
+	removed = true
+	return
 }

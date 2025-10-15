@@ -98,6 +98,7 @@ type MongoDBClusterStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Shards     []string           `json:"shards,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -57,6 +57,7 @@ type MgoDataReplicaSetReconciler struct {
 // +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mgodatareplicasets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mgodatareplicasets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mgodatareplicasets/finalizers,verbs=update
+// +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mongodbclusters/status,verbs=get;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -135,18 +136,31 @@ func (r *MgoDataReplicaSetReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return
 	}
 
-	// After downgrading the replica set, it is necessary to remove metadata from the cluster
-	if !mgoDataReplicaSet.Spec.EnableShard {
-
-	}
-
-	initialized, addedShard, retErr = r.checkAndSetMgoReplicaSetSetup(mgoCluster, mgoDataReplicaSet, log)
-	if retErr != nil {
+	if initialized, retErr = r.checkAndInitializeReplicaSet(mgoCluster, mgoDataReplicaSet, log); retErr != nil {
 		retCtrl.RequeueAfter = time.Second
 		return
 	}
 
-	return ctrl.Result{}, nil
+	if mgoDataReplicaSet.Spec.EnableShard {
+		// Check and add the shard to the mongodb cluster
+		if addedShard, retErr = r.checkAndAddShard(mgoCluster, mgoDataReplicaSet, log); retErr != nil {
+			retCtrl.RequeueAfter = time.Second
+			return
+		}
+		if _, err := AddMongodbClusterShardToStatus(mgoCluster, replicaSetId, r); err != nil {
+			retErr = err
+			retCtrl.RequeueAfter = time.Second
+			return
+		}
+	} else {
+		// After downgrading the replica set, it is necessary to remove metadata from the cluster
+		if retErr = r.checkAndRemoveShard(mgoCluster, mgoDataReplicaSet, log); retErr != nil {
+			retCtrl.RequeueAfter = time.Second
+			return
+		}
+	}
+
+	return
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -154,6 +168,7 @@ func (r *MgoDataReplicaSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mongodbv1.MgoDataReplicaSet{}).
 		Named("mgodatareplicaset").
+		Owns(&appsv1.StatefulSet{}).
 		Complete(r)
 }
 
@@ -325,11 +340,15 @@ func (r *MgoDataReplicaSetReconciler) createStatefulSet(ctx context.Context, mgo
 }
 
 func (r *MgoDataReplicaSetReconciler) cleanupBeforeDelete(mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet) error {
+	replicaSetId := mgoDataReplicaSet.GetName()
+	if _, err := RemoveMongodbClusterShardInStatus(mgoCluster, replicaSetId, r); err != nil {
+		return nil
+	}
+
 	if !mgoDataReplicaSet.Status.AddedShard {
 		return nil
 	}
 
-	replicaSetId := mgoDataReplicaSet.GetName()
 	routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), mgoCluster.Spec.Routers.ServicePort)
 	if err := mongoclient.SafeRemoveShard(mgoCluster.Spec.DBConnTimeout, routerMgoAddr, replicaSetId); err != nil {
 		return err
@@ -337,8 +356,8 @@ func (r *MgoDataReplicaSetReconciler) cleanupBeforeDelete(mgoCluster *mongodbv1.
 	return nil
 }
 
-func (r *MgoDataReplicaSetReconciler) checkAndSetMgoReplicaSetSetup(mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet,
-	log logr.Logger) (retInitialized, retAddedShard bool, retErr error) {
+func (r *MgoDataReplicaSetReconciler) checkAndInitializeReplicaSet(mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet,
+	log logr.Logger) (retInitialized bool, retErr error) {
 
 	replicaSetId := mgoDataReplicaSet.GetName()
 	// The pods of the replica set are reconciled, check or initialize the replica set
@@ -364,8 +383,25 @@ func (r *MgoDataReplicaSetReconciler) checkAndSetMgoReplicaSetSetup(mgoCluster *
 
 	// Check and add the shard to the mongodb cluster
 	if !mgoDataReplicaSet.Spec.EnableShard {
+		// After downgrading the replica set, it is necessary to remove metadata from the cluster
+		if mgoDataReplicaSet.Status.AddedShard {
+			return
+		}
+
 		return
 	}
+
+	return
+}
+
+func (r *MgoDataReplicaSetReconciler) checkAndAddShard(mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet,
+	log logr.Logger) (retAddedShard bool, retErr error) {
+
+	replicaSetId := mgoDataReplicaSet.GetName()
+	// The pods of the replica set are reconciled, check or initialize the replica set
+	primaryMgoAddr, secondaryMgoAddrs, arbiterMgoAddrs := FmtDataReplicaSetMgoAddrs(mgoCluster.GetName(), mgoCluster.GetNamespace(),
+		replicaSetId, mgoDataReplicaSet.Spec.Port, mgoDataReplicaSet.Spec.NumSecondaryNodes, mgoDataReplicaSet.Spec.NumArbiterNodes)
+
 	routerMgoAddr := FmtRouterMgoAddr(mgoCluster.GetName(), mgoCluster.GetNamespace(), mgoCluster.Spec.Routers.ServicePort)
 	shardDBAddrs := append([]string{primaryMgoAddr}, secondaryMgoAddrs...)
 	shardDBAddrs = append(shardDBAddrs, arbiterMgoAddrs...)
@@ -385,6 +421,13 @@ func (r *MgoDataReplicaSetReconciler) checkAndSetMgoReplicaSetSetup(mgoCluster *
 	}
 	retAddedShard = true
 	log.Info("Successfully added the shard to the mongodb cluster", "replicaSetId", replicaSetId)
+
+	return
+}
+
+func (r *MgoDataReplicaSetReconciler) checkAndRemoveShard(mgoCluster *mongodbv1.MongoDBCluster, mgoDataReplicaSet *mongodbv1.MgoDataReplicaSet,
+	log logr.Logger) (retErr error) {
+
 	return
 }
 

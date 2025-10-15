@@ -228,6 +228,10 @@ spec:
                   - type
                   type: object
                 type: array
+              shards:
+                items:
+                  type: string
+                type: array
             type: object
         required:
         - spec
