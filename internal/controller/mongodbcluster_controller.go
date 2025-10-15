@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -62,14 +63,12 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	if len(mgoCluster.Status.Conditions) == 0 {
-		meta.SetStatusCondition(&mgoCluster.Status.Conditions, metav1.Condition{Type: "Available", Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
-		return ctrl.Result{}, r.Status().Update(ctx, mgoCluster)
-	}
-
 	defer func() {
 		if err := r.Get(ctx, req.NamespacedName, mgoCluster); err != nil {
 			log.Error(err, "Unable to get the mgoCluster resource")
+			if retErr == nil {
+				retErr = err
+			}
 			return
 		}
 
@@ -86,16 +85,12 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 		if e := r.Status().Update(ctx, mgoCluster); e != nil {
 			log.Error(e, "Unable to update the status of the mgoCluster resource")
+			if retErr == nil {
+				retErr = e
+			}
 			return
 		}
 	}()
-
-	if retCtrl, retErr = r.reconcileShards(ctx, log, mgoCluster); retErr != nil || retCtrl.RequeueAfter > 0 {
-		if retErr != nil {
-			retErr = fmt.Errorf("failed to reconcile the shards, %v", retErr)
-		}
-		return
-	}
 
 	if retCtrl, retErr = r.reconcileConfigServer(ctx, log, mgoCluster); retErr != nil || retCtrl.RequeueAfter > 0 {
 		if retErr != nil {
@@ -119,5 +114,68 @@ func (r *MongoDBClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mongodbv1.MongoDBCluster{}).
 		Named("mongodbcluster").
+		Owns(&appsv1.StatefulSet{}).
 		Complete(r)
+}
+
+func GetMongodbClusterRes(ctx context.Context, reader client.Reader, ns string) (*mongodbv1.MongoDBCluster, error) {
+	var mgoClusterList mongodbv1.MongoDBClusterList
+	if err := reader.List(ctx, &mgoClusterList, client.InNamespace(ns)); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if len(mgoClusterList.Items) <= 0 {
+		return nil, nil
+	}
+
+	//return mgoClusterList.Items[0].DeepCopy(), nil
+	return &mgoClusterList.Items[0], nil
+}
+
+func AddMongodbClusterShardToStatus(mgoCluster *mongodbv1.MongoDBCluster, replicaSetId string, statusClient client.StatusClient) (added bool, retErr error) {
+	for _, rsId := range mgoCluster.Status.Shards {
+		if replicaSetId == rsId {
+			return
+		}
+	}
+
+	patch := client.MergeFrom(mgoCluster.DeepCopy())
+	mgoCluster.Status.Shards = append(mgoCluster.Status.Shards, replicaSetId)
+	if retErr = statusClient.Status().Patch(context.TODO(), mgoCluster, patch); retErr != nil {
+		return
+	}
+
+	added = true
+	return
+}
+
+func RemoveMongodbClusterShardInStatus(mgoCluster *mongodbv1.MongoDBCluster, replicaSetId string, statusClient client.StatusClient) (removed bool, retErr error) {
+	rsIdExists := false
+	for _, rsId := range mgoCluster.Status.Shards {
+		if replicaSetId == rsId {
+			rsIdExists = true
+			break
+		}
+	}
+	if !rsIdExists {
+		return
+	}
+
+	patch := client.MergeFrom(mgoCluster.DeepCopy())
+	shards := mgoCluster.Status.Shards
+	mgoCluster.Status.Shards = []string{}
+	for _, rsId := range shards {
+		if rsId != replicaSetId {
+			mgoCluster.Status.Shards = append(mgoCluster.Status.Shards, rsId)
+		}
+	}
+	if retErr = statusClient.Status().Patch(context.TODO(), mgoCluster, patch); retErr != nil {
+		return
+	}
+
+	removed = true
+	return
 }

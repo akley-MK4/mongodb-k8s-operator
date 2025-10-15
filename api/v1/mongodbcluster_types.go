@@ -35,7 +35,6 @@ type MongoDBClusterSpec struct {
 	// +kubebuilder:default:=10000000000
 	DBConnTimeout    time.Duration            `json:"dbConnTimeout,format:string,omitempty"`
 	DefaultRWConcern *MgoDefaultRWConcernSpec `json:"defaultRWConcern,omitempty"`
-	Shards           map[string]*MgoShardSpec `json:"shards,omitempty"`
 	ConfigServer     MgoConfigServerSpec      `json:"configServer,omitempty"`
 	Routers          MgoRoutersSpec           `json:"routers,omitempty"`
 }
@@ -45,21 +44,10 @@ type MongoDBClusterSpec struct {
 type ComponentType string
 
 const (
-	ComponentTypeShard        ComponentType = "shard"
-	ComponentTypeRouter       ComponentType = "router"
-	ComponentTypeConfigServer ComponentType = "configserver"
+	ComponentTypeDataReplicaSet ComponentType = "datars"
+	ComponentTypeRouter         ComponentType = "router"
+	ComponentTypeConfigServer   ComponentType = "configserver"
 )
-
-// +kubebuilder:object:generate=true
-
-type MgoShardSpec struct {
-	NumSecondaryNodes uint16 `json:"numSecondaryNodes,omitempty"`
-	NumArbiterNodes   uint16 `json:"numArbiterNodes,omitempty"`
-	// +kubebuilder:default:=/data/db
-	DataPath string `json:"dataPath,omitempty"`
-	// +kubebuilder:default:=27018
-	Port uint16 `json:"port,omitempty"`
-}
 
 // +kubebuilder:object:generate=true
 
@@ -110,6 +98,7 @@ type MongoDBClusterStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Shards     []string           `json:"shards,omitempty"`
 }
 
 // +kubebuilder:object:root=true

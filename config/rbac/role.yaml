@@ -7,6 +7,7 @@ rules:
 - apiGroups:
   - mongodb.akleymk4.com
   resources:
+  - mgodatareplicasets
   - mongodbclusters
   verbs:
   - create
@@ -19,12 +20,14 @@ rules:
 - apiGroups:
   - mongodb.akleymk4.com
   resources:
+  - mgodatareplicasets/finalizers
   - mongodbclusters/finalizers
   verbs:
   - update
 - apiGroups:
   - mongodb.akleymk4.com
   resources:
+  - mgodatareplicasets/status
   - mongodbclusters/status
   verbs:
   - get

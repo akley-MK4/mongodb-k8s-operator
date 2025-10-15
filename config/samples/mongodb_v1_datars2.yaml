@@ -1,0 +1,11 @@
+apiVersion: mongodb.akleymk4.com/v1
+kind: MgoDataReplicaSet
+metadata:
+  labels:
+    app.kubernetes.io/name: mongodb-k8s-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: datars2
+spec:
+  numSecondaryNodes: 2
+  numArbiterNodes: 0
+  enableShard: false
