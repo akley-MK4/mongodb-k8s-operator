@@ -18,6 +18,10 @@ resources:
   kind: MongoDBCluster
   path: github.com/akley-MK4/mongodb-k8s-operator/api/v1
   version: v1
+  webhooks:
+    defaulting: true
+    validation: true
+    webhookVersion: v1
 - api:
     crdVersion: v1
     namespaced: true
