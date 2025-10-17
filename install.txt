@@ -1,8 +1,10 @@
 go mod init github.com/akley-MK4/mongodb-cluster/mgo-k8s-operator
 
 kubebuilder init --domain akleymk4.com --repo github.com/akley-MK4/mongodb-k8s-operator
+kubebuilder init --domain akleymk4.com --repo github.com/akley-MK4/mongodb-k8s-operator
 
 kubebuilder create api --group mongodb --version v1 --kind MongoDBCluster
+kubebuilder create api --group mongodb --version v1 --kind MgoDataReplicaSet
 kubebuilder create api --group mongodb --version v1 --kind MgoDataReplicaSet
 
 kubebuilder create webhook --group mongodb --version v1 --kind MongoDBCluster --defaulting --programmatic-validation
