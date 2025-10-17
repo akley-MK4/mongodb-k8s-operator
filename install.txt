@@ -6,5 +6,6 @@ kubebuilder create api --group mongodb --version v1 --kind MongoDBCluster
 kubebuilder create api --group mongodb --version v1 --kind MgoDataReplicaSet
 
 kubebuilder create webhook --group mongodb --version v1 --kind MongoDBCluster --defaulting --programmatic-validation
+kubebuilder create webhook --group mongodb --version v1 --kind MgoDataReplicaSet --defaulting --programmatic-validation
 
 https://hub.docker.com/r/mongodb/mongodb-community-server/tags

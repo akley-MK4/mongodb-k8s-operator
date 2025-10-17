@@ -10,6 +10,26 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /mutate-mongodb-akleymk4-com-v1-mgodatareplicaset
+  failurePolicy: Fail
+  name: mmgodatareplicaset-v1.kb.io
+  rules:
+  - apiGroups:
+    - mongodb.akleymk4.com
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - mgodatareplicasets
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /mutate-mongodb-akleymk4-com-v1-mongodbcluster
   failurePolicy: Fail
   name: mmongodbcluster-v1.kb.io
@@ -30,6 +50,26 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: validating-webhook-configuration
 webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-mongodb-akleymk4-com-v1-mgodatareplicaset
+  failurePolicy: Fail
+  name: vmgodatareplicaset-v1.kb.io
+  rules:
+  - apiGroups:
+    - mongodb.akleymk4.com
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - mgodatareplicasets
+  sideEffects: None
 - admissionReviewVersions:
   - v1
   clientConfig:
