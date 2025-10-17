@@ -41,7 +41,7 @@ type MongoDBClusterReconciler struct {
 // +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mongodbclusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mongodbclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=mongodb.akleymk4.com,resources=mongodbclusters/finalizers,verbs=update
-// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=statefulsets;deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
