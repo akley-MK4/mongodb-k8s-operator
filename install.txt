@@ -1,3 +1,6 @@
+https://hub.docker.com/r/mongodb/mongodb-community-server/tags
+sudo docker pull mongodb/mongodb-community-server:7.0.11-ubuntu2204
+
 go mod init github.com/akley-MK4/mongodb-cluster/mgo-k8s-operator
 
 kubebuilder init --domain akleymk4.com --repo github.com/akley-MK4/mongodb-k8s-operator
@@ -10,4 +13,17 @@ kubebuilder create api --group mongodb --version v1 --kind MgoDataReplicaSet
 kubebuilder create webhook --group mongodb --version v1 --kind MongoDBCluster --defaulting --programmatic-validation
 kubebuilder create webhook --group mongodb --version v1 --kind MgoDataReplicaSet --defaulting --programmatic-validation
 
-https://hub.docker.com/r/mongodb/mongodb-community-server/tags
+
+
+sudo docker pull k8s.nju.edu.cn/kube-state-metrics/kube-state-metrics:v2.17.0
+sudo docker tag k8s.nju.edu.cn/kube-state-metrics/kube-state-metrics:v2.17.0 registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.17.0
+sudo docker pull k8s.nju.edu.cn/ingress-nginx/kube-webhook-certgen:v1.6.3
+sudo docker tag k8s.nju.edu.cn/ingress-nginx/kube-webhook-certgen:v1.6.3 registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.3
+
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm search repo prometheus-community --versions
+helm show values prometheus-community/kube-prometheus-stack --version 78.3.2 > values.yaml
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 78.3.2 -n monitoring -f ./values.yaml
+helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack -n monitoring -f ./values.yaml
