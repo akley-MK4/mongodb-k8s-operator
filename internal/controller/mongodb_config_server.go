@@ -8,6 +8,7 @@ import (
 	"time"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
+	"github.com/akley-MK4/mongodb-k8s-operator/pkg/metrics"
 	mongoclient "github.com/akley-MK4/mongodb-k8s-operator/pkg/mongo-client"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -103,7 +104,7 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 			return ctrl.Result{}, e
 		}
 		log.Info("Successfully created a stateful set for config server", "replicaSetId", confSrvSpec.ReplicaSetId)
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	} else {
 		log.Info("The stateful set of config server exists", "replicaSetId", confSrvSpec.ReplicaSetId)
 	}
@@ -116,6 +117,17 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 		}
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
+
+	initialized := false
+	defer func() {
+		metrics.GetStatsConfigServiceHandler().Update(
+			confSrvSpec.ReplicaSetId,
+			int64(*foundStatefulSet.Spec.Replicas),
+			int64(foundStatefulSet.Status.ReadyReplicas),
+			int64(foundStatefulSet.Status.UpdatedReplicas),
+			initialized,
+		)
+	}()
 
 	if foundStatefulSet.Status.ReadyReplicas != confSrvSpec.NumReplicas || foundStatefulSet.Status.UpdatedReplicas != confSrvSpec.NumReplicas {
 		log.Info("Waiting for all pods of the config replica set to be ready",
@@ -131,6 +143,7 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 	if err := r.checkAndSetMgoReplicaSetSetup(mgoCluster, log); err != nil {
 		return ctrl.Result{RequeueAfter: time.Second}, err
 	}
+	initialized = true
 
 	return ctrl.Result{}, nil
 }

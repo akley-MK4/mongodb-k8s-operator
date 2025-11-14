@@ -40,6 +40,7 @@ import (
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
 	"github.com/akley-MK4/mongodb-k8s-operator/internal/controller"
 	webhookv1 "github.com/akley-MK4/mongodb-k8s-operator/internal/webhook/v1"
+	_ "github.com/akley-MK4/mongodb-k8s-operator/pkg/metrics"
 	// +kubebuilder:scaffold:imports
 )
 

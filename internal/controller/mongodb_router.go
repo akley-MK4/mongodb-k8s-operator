@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
+	"github.com/akley-MK4/mongodb-k8s-operator/pkg/metrics"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -107,7 +108,7 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 			return ctrl.Result{}, e
 		}
 		log.Info("Successfully created a deployment for the routers")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	} else {
 		log.Info("The deployment exists for the routers")
 	}
@@ -121,6 +122,16 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
+	initialized := false
+	defer func() {
+		metrics.GetStatsRouterServiceHandler().Update(
+			int64(*foundDeployment.Spec.Replicas),
+			int64(foundDeployment.Status.ReadyReplicas),
+			int64(foundDeployment.Status.UpdatedReplicas),
+			initialized,
+		)
+	}()
+
 	if foundDeployment.Status.ReadyReplicas != routersSpec.NumReplicas || foundDeployment.Status.UpdatedReplicas != routersSpec.NumReplicas {
 		log.Info("Waiting for all pods of the router to be ready",
 			"replicas", routersSpec.NumReplicas,
@@ -128,6 +139,7 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 			"updatedReplicas", foundDeployment.Status.UpdatedReplicas)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
+	initialized = true
 
 	return ctrl.Result{}, nil
 }

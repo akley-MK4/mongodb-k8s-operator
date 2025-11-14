@@ -40,6 +40,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
+	"github.com/akley-MK4/mongodb-k8s-operator/pkg/metrics"
 	mongoclient "github.com/akley-MK4/mongodb-k8s-operator/pkg/mongo-client"
 	"github.com/go-logr/logr"
 )
@@ -117,8 +118,11 @@ func (r *MgoDataReplicaSetReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	addedShard := false
 	initialized := false
+	metrics.GetStatsDataReplicasetServiceHandler().NewStatsDataReplicasetServiceRecord(replicaSetId)
 
 	defer func() {
+		metrics.GetStatsDataReplicasetServiceHandler().SetInitializedStatus(replicaSetId, initialized)
+		metrics.GetStatsDataReplicasetServiceHandler().SetAddedShardStatus(replicaSetId, addedShard)
 		if err := r.updateStatus(ctx, req.NamespacedName, retErr, initialized, addedShard); err != nil {
 			if retErr == nil {
 				retErr = err
@@ -270,7 +274,7 @@ func (r *MgoDataReplicaSetReconciler) reconcileStatefulSet(ctx context.Context, 
 			return ctrl.Result{}, e
 		}
 		log.Info("Successfully created a stateful set for the data replica set", "replicaSetId", replicaSetId)
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	} else {
 		log.Info("The stateful set of the data replica set exists", "replicaSetId", replicaSetId)
 	}
@@ -284,6 +288,15 @@ func (r *MgoDataReplicaSetReconciler) reconcileStatefulSet(ctx context.Context, 
 		}
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
+
+	defer func() {
+		metrics.GetStatsDataReplicasetServiceHandler().SetNumReplicas(
+			replicaSetId,
+			int64(*foundStatefulSet.Spec.Replicas),
+			int64(foundStatefulSet.Status.ReadyReplicas),
+			int64(foundStatefulSet.Status.UpdatedReplicas),
+		)
+	}()
 
 	for idx, co := range foundStatefulSet.Spec.Template.Spec.Containers {
 		if co.Name != "mongod" {
