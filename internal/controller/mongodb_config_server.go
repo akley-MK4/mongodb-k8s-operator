@@ -123,9 +123,13 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 	defer func() {
 		ns := mgoCluster.GetNamespace()
 		statsHandler := metrics.GetStatsConfigServiceHandler()
-		statsHandler.SetNumReplicas(int64(*foundStatefulSet.Spec.Replicas), confSrvSpec.ReplicaSetId, ns)
-		statsHandler.SetNumReadyReplicas(int64(foundStatefulSet.Status.ReadyReplicas), confSrvSpec.ReplicaSetId, ns)
-		statsHandler.SetNumUpdatedReplicas(int64(foundStatefulSet.Status.UpdatedReplicas), confSrvSpec.ReplicaSetId, ns)
+		statsHandler.SetNumReplicas(
+			int64(*foundStatefulSet.Spec.Replicas),
+			int64(foundStatefulSet.Status.ReadyReplicas),
+			int64(foundStatefulSet.Status.UpdatedReplicas),
+			confSrvSpec.ReplicaSetId,
+			ns,
+		)
 		statsHandler.SetUpStatus(upStatus, errReason, confSrvSpec.ReplicaSetId, ns)
 	}()
 

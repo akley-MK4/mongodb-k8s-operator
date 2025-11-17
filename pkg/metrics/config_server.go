@@ -10,46 +10,28 @@ func newStatsConfigServiceHandler() *StatsConfigServiceHandler {
 		statNumReplicas: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "num_replicas_of_config_server",
-			}, []string{"replicaSetId", "namespace"},
-		),
-		statNumReadyReplicas: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "num_ready_replicas_of_config_server",
-			}, []string{"replicaSetId", "namespace"},
-		),
-		statNumUpdatedReplicas: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "num_updated_replicas_of_config_server",
-			}, []string{"replicaSetId", "namespace"},
+			}, []string{"replicaSetId", "type", "namespace"},
 		),
 		statUpStatus: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "up_status_config_server",
-			}, []string{"replicaSetId", "namespace", "errReason"},
+			}, []string{"replicaSetId", "errReason", "namespace"},
 		),
 	}
 
-	PromMetrics.Registry.MustRegister(handler.statNumReplicas, handler.statNumReadyReplicas, handler.statNumUpdatedReplicas, handler.statUpStatus)
+	PromMetrics.Registry.MustRegister(handler.statNumReplicas, handler.statUpStatus)
 	return handler
 }
 
 type StatsConfigServiceHandler struct {
-	statNumReplicas        *prometheus.GaugeVec
-	statNumReadyReplicas   *prometheus.GaugeVec
-	statNumUpdatedReplicas *prometheus.GaugeVec
-	statUpStatus           *prometheus.GaugeVec
+	statNumReplicas *prometheus.GaugeVec
+	statUpStatus    *prometheus.GaugeVec
 }
 
-func (t *StatsConfigServiceHandler) SetNumReplicas(numReplicas int64, replicaSetId, namespace string) {
-	t.statNumReplicas.WithLabelValues(replicaSetId, namespace).Set(float64(numReplicas))
-}
-
-func (t *StatsConfigServiceHandler) SetNumReadyReplicas(numReplicas int64, replicaSetId, namespace string) {
-	t.statNumReadyReplicas.WithLabelValues(replicaSetId, namespace).Set(float64(numReplicas))
-}
-
-func (t *StatsConfigServiceHandler) SetNumUpdatedReplicas(numReplicas int64, replicaSetId, namespace string) {
-	t.statNumUpdatedReplicas.WithLabelValues(replicaSetId, namespace).Set(float64(numReplicas))
+func (t *StatsConfigServiceHandler) SetNumReplicas(numReplicas, numReadyReplicas, numUpdatedReplicas int64, replicaSetId, namespace string) {
+	t.statNumReplicas.WithLabelValues(replicaSetId, "replicas", namespace).Set(float64(numReplicas))
+	t.statNumReplicas.WithLabelValues(replicaSetId, "readyReplicas", namespace).Set(float64(numReadyReplicas))
+	t.statNumReplicas.WithLabelValues(replicaSetId, "updatedReplicas", namespace).Set(float64(numUpdatedReplicas))
 }
 
 func (t *StatsConfigServiceHandler) SetUpStatus(upStatus bool, errReason, replicaSetId, namespace string) {
@@ -61,7 +43,7 @@ func (t *StatsConfigServiceHandler) SetUpStatus(upStatus bool, errReason, replic
 	t.statUpStatus.Reset()
 	t.statUpStatus.WithLabelValues(
 		replicaSetId,
-		namespace,
 		errReason,
+		namespace,
 	).Set(hasUp)
 }
