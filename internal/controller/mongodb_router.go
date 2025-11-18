@@ -122,24 +122,28 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
-	initialized := false
+	upStatus := false
+	errReason := ""
 	defer func() {
-		metrics.GetStatsRouterServiceHandler().Update(
+		handler := metrics.GetStatsRouterServiceHandler()
+		handler.SetNumReplicas(
 			int64(*foundDeployment.Spec.Replicas),
 			int64(foundDeployment.Status.ReadyReplicas),
 			int64(foundDeployment.Status.UpdatedReplicas),
-			initialized,
+			mgoCluster.GetNamespace(),
 		)
+		handler.SetUpStatus(upStatus, errReason, mgoCluster.GetNamespace())
 	}()
 
 	if foundDeployment.Status.ReadyReplicas != routersSpec.NumReplicas || foundDeployment.Status.UpdatedReplicas != routersSpec.NumReplicas {
-		log.Info("Waiting for all pods of the router to be ready",
+		errReason = "Waiting for all pods of the router to be ready"
+		log.Info(errReason,
 			"replicas", routersSpec.NumReplicas,
 			"readyReplicas", foundDeployment.Status.ReadyReplicas,
 			"updatedReplicas", foundDeployment.Status.UpdatedReplicas)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
-	initialized = true
+	upStatus = true
 
 	return ctrl.Result{}, nil
 }

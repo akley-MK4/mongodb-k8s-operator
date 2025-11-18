@@ -118,11 +118,19 @@ func (r *MgoDataReplicaSetReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	addedShard := false
 	initialized := false
-	metrics.GetStatsDataReplicasetServiceHandler().NewStatsDataReplicasetServiceRecord(replicaSetId)
 
 	defer func() {
-		metrics.GetStatsDataReplicasetServiceHandler().SetInitializedStatus(replicaSetId, initialized)
-		metrics.GetStatsDataReplicasetServiceHandler().SetAddedShardStatus(replicaSetId, addedShard)
+		upStatus := initialized
+		if mgoDataReplicaSet.Spec.EnableShard && !addedShard {
+			upStatus = false
+		}
+
+		errReason := ""
+		if retErr != nil {
+			errReason = retErr.Error()
+		}
+		metrics.GetStatsDataReplicasetServiceHandler().SetUpStatus(upStatus, errReason, replicaSetId, req.Namespace)
+
 		if err := r.updateStatus(ctx, req.NamespacedName, retErr, initialized, addedShard); err != nil {
 			if retErr == nil {
 				retErr = err
@@ -291,10 +299,11 @@ func (r *MgoDataReplicaSetReconciler) reconcileStatefulSet(ctx context.Context, 
 
 	defer func() {
 		metrics.GetStatsDataReplicasetServiceHandler().SetNumReplicas(
-			replicaSetId,
 			int64(*foundStatefulSet.Spec.Replicas),
 			int64(foundStatefulSet.Status.ReadyReplicas),
 			int64(foundStatefulSet.Status.UpdatedReplicas),
+			replicaSetId,
+			mgoDataReplicaSet.GetNamespace(),
 		)
 	}()
 

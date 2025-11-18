@@ -1,40 +1,48 @@
 package metrics
 
 import (
-	"strconv"
-
 	"github.com/prometheus/client_golang/prometheus"
 	PromMetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 func newStatsRouterServiceHandler() *StatsRouterServiceHandler {
 	handler := &StatsRouterServiceHandler{
-		stats: prometheus.NewGaugeVec(
+		statNumReplicas: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Name: "router_service_info",
-				Help: "Record the status information of routing services",
-			}, []string{"numReplicas", "numReadyReplicas", "numUpdatedReplicas", "status"},
+				Name: "num_replicas_of_router",
+			}, []string{"type", "namespace"},
+		),
+		statUpStatus: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "up_status_router",
+			}, []string{"errReason", "namespace"},
 		),
 	}
 
-	PromMetrics.Registry.MustRegister(handler.stats)
+	PromMetrics.Registry.MustRegister(handler.statNumReplicas, handler.statUpStatus)
 	return handler
 }
 
 type StatsRouterServiceHandler struct {
-	stats *prometheus.GaugeVec
+	statNumReplicas *prometheus.GaugeVec
+	statUpStatus    *prometheus.GaugeVec
 }
 
-func (t *StatsRouterServiceHandler) Update(numReplicas, numReadyReplicas, numUpdatedReplicas int64, initialized bool) {
-	t.stats.Reset()
-	status := "uninitialized"
-	if initialized {
-		status = "initialized"
+func (t *StatsRouterServiceHandler) SetNumReplicas(numReplicas, numReadyReplicas, numUpdatedReplicas int64, namespace string) {
+	t.statNumReplicas.WithLabelValues("replicas", namespace).Set(float64(numReplicas))
+	t.statNumReplicas.WithLabelValues("readyReplicas", namespace).Set(float64(numReadyReplicas))
+	t.statNumReplicas.WithLabelValues("updatedReplicas", namespace).Set(float64(numUpdatedReplicas))
+}
+
+func (t *StatsRouterServiceHandler) SetUpStatus(upStatus bool, errReason, namespace string) {
+	hasUp := float64(0)
+	if upStatus {
+		hasUp = 1
 	}
-	t.stats.WithLabelValues(
-		strconv.FormatInt(numReplicas, 10),
-		strconv.FormatInt(numReadyReplicas, 10),
-		strconv.FormatInt(numUpdatedReplicas, 10),
-		status,
-	).SetToCurrentTime()
+
+	t.statUpStatus.Reset()
+	t.statUpStatus.WithLabelValues(
+		errReason,
+		namespace,
+	).Set(hasUp)
 }
