@@ -119,18 +119,16 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 	}
 
 	upStatus := false
-	errReason := ""
 	defer func() {
-		ns := mgoCluster.GetNamespace()
-		statsHandler := metrics.GetStatsConfigServiceHandler()
-		statsHandler.SetNumReplicas(
+		metrics.GetStatsNumMgoPodReplicasHandler().Set(
 			int64(*foundStatefulSet.Spec.Replicas),
 			int64(foundStatefulSet.Status.ReadyReplicas),
 			int64(foundStatefulSet.Status.UpdatedReplicas),
+			string(mongodbv1.ComponentTypeConfigServer),
 			confSrvSpec.ReplicaSetId,
-			ns,
+			mgoCluster.GetNamespace(),
 		)
-		statsHandler.SetUpStatus(upStatus, errReason, confSrvSpec.ReplicaSetId, ns)
+		metrics.GetStatsMgoComponentStateHandler().Set(string(mongodbv1.ComponentTypeConfigServer), confSrvSpec.ReplicaSetId, mgoCluster.GetNamespace(), upStatus)
 	}()
 
 	if foundStatefulSet.Status.ReadyReplicas != confSrvSpec.NumReplicas || foundStatefulSet.Status.UpdatedReplicas != confSrvSpec.NumReplicas {
@@ -145,7 +143,6 @@ func (r *MongoDBClusterReconciler) reconcileConfigServerStatefulSet(ctx context.
 
 	// The pods of the replica set are reconciled, check or initialize the replica set
 	if err := r.checkAndSetMgoReplicaSetSetup(mgoCluster, log); err != nil {
-		errReason = err.Error()
 		return ctrl.Result{RequeueAfter: time.Second}, err
 	}
 	upStatus = true

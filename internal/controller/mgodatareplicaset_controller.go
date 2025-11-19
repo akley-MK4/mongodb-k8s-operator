@@ -125,11 +125,7 @@ func (r *MgoDataReplicaSetReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			upStatus = false
 		}
 
-		errReason := ""
-		if retErr != nil {
-			errReason = retErr.Error()
-		}
-		metrics.GetStatsDataReplicasetServiceHandler().SetUpStatus(upStatus, errReason, replicaSetId, req.Namespace)
+		metrics.GetStatsMgoComponentStateHandler().Set(string(mongodbv1.ComponentTypeDataReplicaSet), replicaSetId, req.Namespace, upStatus)
 
 		if err := r.updateStatus(ctx, req.NamespacedName, retErr, initialized, addedShard); err != nil {
 			if retErr == nil {
@@ -298,12 +294,13 @@ func (r *MgoDataReplicaSetReconciler) reconcileStatefulSet(ctx context.Context, 
 	}
 
 	defer func() {
-		metrics.GetStatsDataReplicasetServiceHandler().SetNumReplicas(
+		metrics.GetStatsNumMgoPodReplicasHandler().Set(
 			int64(*foundStatefulSet.Spec.Replicas),
 			int64(foundStatefulSet.Status.ReadyReplicas),
 			int64(foundStatefulSet.Status.UpdatedReplicas),
+			string(mongodbv1.ComponentTypeDataReplicaSet),
 			replicaSetId,
-			mgoDataReplicaSet.GetNamespace(),
+			mgoCluster.GetNamespace(),
 		)
 	}()
 
