@@ -38,3 +38,7 @@ func (t *StatsMgoComponentStateHandler) Set(mgoComponent, replicaSetId, ns strin
 	}
 	t.gaugeVec.WithLabelValues(mgoComponent, replicaSetId, ns).Set(hasUp)
 }
+
+func (t *StatsMgoComponentStateHandler) Delete(mgoComponent, replicaSetId, ns string) {
+	t.gaugeVec.DeleteLabelValues(mgoComponent, replicaSetId, ns)
+}

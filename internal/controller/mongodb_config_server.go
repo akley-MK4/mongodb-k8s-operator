@@ -282,3 +282,8 @@ func FmtConfigServerMgoAddrs(clusterName, ns, replicaSetId string, numReplicas i
 
 	return
 }
+
+func DeleteConfigServerGaugeVec(replicaSetId, ns string) {
+	metrics.GetStatsMgoComponentStateHandler().Delete(string(mongodbv1.ComponentTypeConfigServer), replicaSetId, ns)
+	metrics.GetStatsNumMgoPodReplicasHandler().Delete(string(mongodbv1.ComponentTypeConfigServer), replicaSetId, ns)
+}

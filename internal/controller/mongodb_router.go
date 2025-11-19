@@ -22,6 +22,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	RouterReplicaSetId = "router-default"
+)
+
 func (r *MongoDBClusterReconciler) reconcileRouters(ctx context.Context, log logr.Logger, mgoCluster *mongodbv1.MongoDBCluster) (retCtrl ctrl.Result, retErr error) {
 	if retCtrl, retErr = r.reconcileRouterService(ctx, log, mgoCluster); retErr != nil {
 		retErr = fmt.Errorf("resource: Service, error: %v", retErr)
@@ -129,10 +133,10 @@ func (r *MongoDBClusterReconciler) reconcileRouterDeployment(ctx context.Context
 			int64(foundDeployment.Status.ReadyReplicas),
 			int64(foundDeployment.Status.UpdatedReplicas),
 			string(mongodbv1.ComponentTypeRouter),
-			"router-default",
+			RouterReplicaSetId,
 			mgoCluster.GetNamespace(),
 		)
-		metrics.GetStatsMgoComponentStateHandler().Set(string(mongodbv1.ComponentTypeRouter), "router-default", mgoCluster.GetNamespace(), upStatus)
+		metrics.GetStatsMgoComponentStateHandler().Set(string(mongodbv1.ComponentTypeRouter), RouterReplicaSetId, mgoCluster.GetNamespace(), upStatus)
 	}()
 
 	if foundDeployment.Status.ReadyReplicas != routersSpec.NumReplicas || foundDeployment.Status.UpdatedReplicas != routersSpec.NumReplicas {
@@ -253,4 +257,9 @@ func FmtRouterMgoAddr(clusterName, ns string, routerServicePort uint16) string {
 	k8sClusterDomain := "quick3"
 
 	return fmt.Sprintf("%s.%s.svc.%s:%d", svcName, ns, k8sClusterDomain, routerServicePort)
+}
+
+func DeleteRouterGaugeVec(ns string) {
+	metrics.GetStatsMgoComponentStateHandler().Delete(string(mongodbv1.ComponentTypeRouter), RouterReplicaSetId, ns)
+	metrics.GetStatsNumMgoPodReplicasHandler().Delete(string(mongodbv1.ComponentTypeRouter), RouterReplicaSetId, ns)
 }

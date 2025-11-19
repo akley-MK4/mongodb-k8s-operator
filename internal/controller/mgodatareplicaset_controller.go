@@ -113,6 +113,8 @@ func (r *MgoDataReplicaSetReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		if err := r.Update(ctx, resObj); err != nil {
 			return ctrl.Result{}, err
 		}
+
+		DeleteDataReplicasetGaugeVec(replicaSetId, mgoDataReplicaSet.GetNamespace())
 		return ctrl.Result{}, nil
 	}
 
@@ -577,4 +579,9 @@ func FmtDataReplicaSetMgoAddrs(clusterName, ns, replicaSetId string, port uint16
 	retSecondaryAddrs = addrs[1 : 1+numSecondaryNodes]
 	retArbiterAddrs = addrs[1+numSecondaryNodes:]
 	return
+}
+
+func DeleteDataReplicasetGaugeVec(replicaSetId, ns string) {
+	metrics.GetStatsMgoComponentStateHandler().Delete(string(mongodbv1.ComponentTypeDataReplicaSet), replicaSetId, ns)
+	metrics.GetStatsNumMgoPodReplicasHandler().Delete(string(mongodbv1.ComponentTypeDataReplicaSet), replicaSetId, ns)
 }

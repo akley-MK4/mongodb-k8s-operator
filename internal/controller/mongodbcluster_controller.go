@@ -27,9 +27,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	mongodbv1 "github.com/akley-MK4/mongodb-k8s-operator/api/v1"
+)
+
+const (
+	FinalizerMgoCluster = "finalizer-mgo-cluster"
 )
 
 // MongoDBClusterReconciler reconciles a MongoDBCluster object
@@ -63,6 +68,28 @@ func (r *MongoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	if !controllerutil.ContainsFinalizer(mgoCluster, FinalizerMgoCluster) {
+		resObj := mgoCluster.DeepCopy()
+		if controllerutil.AddFinalizer(resObj, FinalizerMgoCluster) {
+			if err := r.Update(ctx, resObj); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if mgoCluster.GetDeletionTimestamp() != nil && !mgoCluster.GetDeletionTimestamp().IsZero() {
+		resObj := mgoCluster.DeepCopy()
+		controllerutil.RemoveFinalizer(resObj, FinalizerMgoCluster)
+		if err := r.Update(ctx, resObj); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		DeleteRouterGaugeVec(mgoCluster.GetNamespace())
+		DeleteConfigServerGaugeVec(resObj.Spec.ConfigServer.ReplicaSetId, mgoCluster.GetNamespace())
+		return ctrl.Result{}, nil
 	}
 
 	defer func() {

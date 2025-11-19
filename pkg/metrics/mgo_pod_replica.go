@@ -36,3 +36,12 @@ func (t *StatsNumMgoPodReplicasHandler) Set(numReplicas, numReadyReplicas, numUp
 	t.gaugeVec.WithLabelValues(mgoComponent, replicaSetId, "readyReplicas", ns).Set(float64(numReadyReplicas))
 	t.gaugeVec.WithLabelValues(mgoComponent, replicaSetId, "updatedReplicas", ns).Set(float64(numUpdatedReplicas))
 }
+
+func (t *StatsNumMgoPodReplicasHandler) Delete(mgoComponent, replicaSetId, ns string) {
+	labels := map[string]string{
+		"mgoComponent": mgoComponent,
+		"replicaSetId": replicaSetId,
+		"ns":           ns,
+	}
+	t.gaugeVec.DeletePartialMatch(labels)
+}
